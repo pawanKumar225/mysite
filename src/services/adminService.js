@@ -391,13 +391,13 @@ class AdminService {
     async createAdmin(adminData) {
         try {
             // Check if admin already exists
-            const existingAdmin = await Admin.findOne({ email: adminData.email });
-            if (existingAdmin) {
-                return {
-                    success: false,
-                    message: 'User with this email already exists'
-                };
-            }
+            // const existingAdmin = await Admin.findOne({ email: adminData.email });
+            // if (existingAdmin) {
+            //     return {
+            //         success: false,
+            //         message: 'User with this email already exists'
+            //     };
+            // }
             
             // Generate default password
             const defaultPassword = generateDefaultPassword();
