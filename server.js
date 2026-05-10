@@ -77,7 +77,20 @@ const adminSchema = new mongoose.Schema({
     isPasswordChanged: {
         type: Boolean,
         default: false
-    }
+    },phone: {
+    type: String,
+    trim: true,
+    default: ''
+},
+department: {
+    type: String,
+    default: 'General',
+    trim: true
+},
+salary: {
+    type: String,
+    default: '$0'
+}
 });
 
 // Generate employee ID before saving
@@ -102,6 +115,7 @@ adminSchema.pre('save', async function(next) {
     }
     next();
 });
+
 
 // Hash password middleware
 adminSchema.pre('save', async function(next) {
@@ -635,6 +649,158 @@ app.get('/test-db', async (req, res) => {
       });
    }
 });
+
+// ==================== UPDATE ADMIN (EDIT) ====================
+app.put('/api/admins/:id', async (req, res) => {
+    try {
+        // Verify JWT token
+        const token = req.headers.authorization?.split(' ')[1];
+        console.log("Token................", req.headers.authorization?.split(' ')[1], "req Body...........", req.headers)
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'No token provided'
+            });
+        }
+
+        try {
+            jwt.verify(token, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid or expired token'
+            });
+        }
+
+        const { id } = req.params;
+        const { name, email, role, phone, department, salary, status } = req.body;
+
+        // Check if admin exists
+        const admin = await Admin.findById(id);
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                message: 'Employee not found'
+            });
+        }
+
+        // Check if email already exists for another user
+        if (email && email !== admin.email) {
+            const existingAdmin = await Admin.findOne({ email, _id: { $ne: id } });
+            if (existingAdmin) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email already exists'
+                });
+            }
+        }
+
+        // Update fields
+        if (name) admin.name = name;
+        if (email) admin.email = email;
+        if (role) admin.role = role;
+        if (phone) admin.phone = phone;
+        if (department) admin.department = department;
+        if (salary) admin.salary = salary;
+        if (status !== undefined) admin.isActive = status === 'Active';
+
+        await admin.save();
+
+        const updatedAdmin = admin.toObject();
+        delete updatedAdmin.password;
+
+        res.status(200).json({
+            success: true,
+            message: 'Employee updated successfully',
+            data: updatedAdmin
+        });
+
+    } catch (error) {
+        console.error('Update admin error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error updating employee',
+            error: error.message
+        });
+    }
+});
+
+// ==================== DELETE ADMIN ====================
+app.delete('/api/admins/:id', async (req, res) => {
+    try {
+        // Verify JWT token
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'No token provided'
+            });
+        }
+
+        try {
+            jwt.verify(token, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid or expired token'
+            });
+        }
+
+        const { id } = req.params;
+
+        // Check if admin exists
+        const admin = await Admin.findById(id);
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                message: 'Employee not found'
+            });
+        }
+
+        // Prevent deletion of super_admin if it's the only one
+        if (admin.role === 'super_admin') {
+            const superAdminCount = await Admin.countDocuments({ role: 'super_admin' });
+            if (superAdminCount === 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot delete the only Super Admin user'
+                });
+            }
+        }
+
+        await Admin.findByIdAndDelete(id);
+
+        res.status(200).json({
+            success: true,
+            message: 'Employee deleted successfully'
+        });
+
+    } catch (error) {
+        console.error('Delete admin error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error deleting employee',
+            error: error.message
+        });
+    }
+});
+
+// Add phone, department, salary fields to admin schema if not already present
+// Update your adminSchema to include these fields:
+/*
+phone: {
+    type: String,
+    trim: true
+},
+department: {
+    type: String,
+    default: 'General'
+},
+salary: {
+    type: String,
+    default: '$0'
+}
+*/
 // ==================== START SERVER ====================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
