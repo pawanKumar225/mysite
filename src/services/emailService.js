@@ -7,8 +7,8 @@ const transporter = nodemailer.createTransport({
     port: 587,
     secure: false,
     auth: {
-        user: process.env.EMAIL_USER || 'your-email@gmail.com',
-        pass: process.env.EMAIL_PASS || 'your-app-password'
+        user: process.env.EMAIL_USER || 'gummadidala.pawan@gmail.com',
+        pass: process.env.EMAIL_PASS || 'bglbtmwylaobvrrz'
     }
 });
 
@@ -36,7 +36,7 @@ const generateDefaultPassword = () => {
 };
 
 // Send welcome email with credentials
-const sendWelcomeEmail = async (userData, defaultPassword) => {
+const sendWelcomeEmailToEmp = async (userData, defaultPassword) => {
     const { name, email, role, employeeId } = userData;
     
     const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
@@ -228,5 +228,5 @@ const sendWelcomeEmail = async (userData, defaultPassword) => {
 
 module.exports = {
     generateDefaultPassword,
-    sendWelcomeEmail
+    sendWelcomeEmailToEmp
 };
