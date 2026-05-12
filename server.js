@@ -106,6 +106,77 @@ userSchema.methods.isLocked = function() {
     return this.lockUntil && this.lockUntil > Date.now();
 };
 
+// ==================== STUDENT PROGRESS SCHEMA ====================
+const studentProgressSchema = new mongoose.Schema({
+    studentId: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'User', 
+        required: true,
+        unique: true 
+    },
+    registrationId: { type: String, required: true },
+    courseProgress: {
+        completed: { type: Number, default: 0 },
+        totalModules: { type: Number, default: 0 },
+        completedModules: { type: Number, default: 0 },
+        currentModule: { type: String, default: "" },
+        nextModule: { type: String, default: "" },
+        assignments: { type: Number, default: 0 },
+        completedAssignments: { type: Number, default: 0 },
+        moduleProgress: [{
+            moduleName: String,
+            moduleNumber: Number,
+            isCompleted: { type: Boolean, default: false },
+            completedAt: Date,
+            score: { type: Number, default: 0 }
+        }]
+    },
+    achievementPoints: { type: Number, default: 0 },
+    certificateStatus: { 
+        type: String, 
+        enum: ['Not Started', 'In Progress', 'Eligible', 'Issued'],
+        default: 'Not Started'
+    },
+    recentActivities: [{
+        activity: String,
+        date: { type: Date, default: Date.now },
+        type: { type: String, enum: ['module', 'assignment', 'security', 'achievement'] }
+    }],
+    lastUpdated: { type: Date, default: Date.now }
+});
+
+// Assignment Schema
+const assignmentSchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    registrationId: { type: String, required: true },
+    assignmentName: { type: String, required: true },
+    description: String,
+    dueDate: Date,
+    submittedAt: Date,
+    status: { 
+        type: String, 
+        enum: ['pending', 'submitted', 'graded', 'late'],
+        default: 'pending'
+    },
+    grade: { type: Number, min: 0, max: 100 },
+    feedback: String,
+    points: { type: Number, default: 0 }
+});
+
+// Module Completion Schema
+const moduleCompletionSchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    registrationId: { type: String, required: true },
+    moduleName: { type: String, required: true },
+    moduleNumber: { type: Number, required: true },
+    completedAt: { type: Date, default: Date.now },
+    score: { type: Number, default: 0 },
+    timeSpent: { type: Number, default: 0 }
+});
+
+const StudentProgress = mongoose.model('StudentProgress', studentProgressSchema);
+const Assignment = mongoose.model('Assignment', assignmentSchema);
+const ModuleCompletion = mongoose.model('ModuleCompletion', moduleCompletionSchema);
 const User = mongoose.model('User', userSchema);
 
 // ==================== ADMIN SCHEMA ====================
@@ -191,9 +262,51 @@ const generateDefaultPassword = () => {
     return password.split('').sort(() => 0.5 - Math.random()).join('');
 };
 
+// Helper function to add activity
+async function addStudentActivity(studentId, activity, type) {
+    try {
+        const progress = await StudentProgress.findOne({ studentId });
+        if (progress) {
+            progress.recentActivities.unshift({
+                activity,
+                date: new Date(),
+                type
+            });
+            
+            if (progress.recentActivities.length > 20) {
+                progress.recentActivities = progress.recentActivities.slice(0, 20);
+            }
+            
+            await progress.save();
+        }
+    } catch (error) {
+        console.error('Error adding activity:', error);
+    }
+}
+
+// Helper function to add achievement points
+async function addAchievementPoints(studentId, points, reason) {
+    try {
+        const progress = await StudentProgress.findOne({ studentId });
+        if (progress) {
+            progress.achievementPoints += points;
+            
+            progress.recentActivities.unshift({
+                activity: `Earned ${points} points: ${reason}`,
+                date: new Date(),
+                type: 'achievement'
+            });
+            
+            await progress.save();
+        }
+    } catch (error) {
+        console.error('Error adding points:', error);
+    }
+}
+
 // ==================== EMAIL FUNCTIONS ====================
 
-// Send welcome email to STUDENT (from /api/register)
+// Send welcome email to STUDENT
 const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
     const { name, email, registrationId, packageDetails, dateOfJoin } = userData;
     
@@ -256,28 +369,18 @@ const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
                         <strong>⚠️ Important Security Notice:</strong>
                         <ul>
                             <li>This is your default password. Please change it after your first login.</li>
-                            <li>Click the button below to login and change your password.</li>
                             <li>Never share your password with anyone.</li>
                         </ul>
                     </div>
                     
                     <div style="text-align: center;">
-                        <a href="http://localhost:5173/student/login" class="button">🔐 Login to Student Portal</a>
+                        <a href="http://localhost:5173/user/login" class="button">🔐 Login to Student Portal</a>
                     </div>
-                    
-                    <p style="margin-top: 20px;"><strong>Next Steps:</strong></p>
-                    <ol>
-                        <li>Login using your email and default password</li>
-                        <li>You will be prompted to change your password on first login</li>
-                        <li>Set a new strong password for your account</li>
-                        <li>Access your courses and learning materials</li>
-                    </ol>
                     
                     <p>For any queries, please contact us at support@intensebeautyacademy.com</p>
                 </div>
                 <div class="footer">
                     <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
-                    <p>This is an automated message, please do not reply.</p>
                 </div>
             </div>
         </body>
@@ -299,7 +402,7 @@ const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
     }
 };
 
-// Send welcome email to ADMIN/EMPLOYEE (from /api/admins)
+// Send welcome email to ADMIN/EMPLOYEE
 const sendAdminWelcomeEmail = async (userData, defaultPassword) => {
     const { name, email, role, employeeId } = userData;
     
@@ -365,7 +468,6 @@ const sendAdminWelcomeEmail = async (userData, defaultPassword) => {
                         <strong>⚠️ Important Security Notice:</strong>
                         <ul>
                             <li>This is your default password. You must change it on first login.</li>
-                            <li>Click the button below to login and set your new password.</li>
                             <li>Never share your credentials with anyone.</li>
                         </ul>
                     </div>
@@ -374,20 +476,10 @@ const sendAdminWelcomeEmail = async (userData, defaultPassword) => {
                         <a href="http://localhost:5173/admin/login" class="button">🔐 Login to Staff Portal</a>
                     </div>
                     
-                    <p><strong>Next Steps:</strong></p>
-                    <ol>
-                        <li>Login using your email and default password</li>
-                        <li>You will be redirected to change your password on first login</li>
-                        <li>Create a strong, secure password for your account</li>
-                        <li>Complete your profile information</li>
-                        <li>Access your dashboard based on your role permissions</li>
-                    </ol>
-                    
                     <p>For any queries, please contact the system administrator.</p>
                 </div>
                 <div class="footer">
                     <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
-                    <p>This is an automated message, please do not reply.</p>
                 </div>
             </div>
         </body>
@@ -409,10 +501,10 @@ const sendAdminWelcomeEmail = async (userData, defaultPassword) => {
     }
 };
 
-// Send password change confirmation email (for both student and admin after password change)
+// Send password change confirmation email
 const sendPasswordChangeConfirmationEmail = async (email, name, userType = 'staff') => {
     const isStudent = userType === 'student';
-    const loginUrl = isStudent ? 'http://localhost:5173/student/login' : 'http://localhost:5173/admin/login';
+    const loginUrl = isStudent ? 'http://localhost:5173/user/login' : 'http://localhost:5173/admin/login';
     const headerColor = isStudent ? 'linear-gradient(135deg, #ff6b6b, #ff8e8e)' : 'linear-gradient(135deg, #667eea, #764ba2)';
     
     const emailHTML = `
@@ -448,28 +540,15 @@ const sendPasswordChangeConfirmationEmail = async (email, name, userType = 'staf
                         <ul>
                             <li>Use your new password for all future logins</li>
                             <li>Keep your password secure and don't share it with anyone</li>
-                            <li>If you didn't make this change, please contact support immediately</li>
                         </ul>
                     </div>
-                    
-                    <p><strong>Security Tips:</strong></p>
-                    <ul>
-                        <li>Never share your password via email or phone</li>
-                        <li>Use a unique password that you don't use elsewhere</li>
-                        <li>Change your password periodically for better security</li>
-                    </ul>
                     
                     <div style="text-align: center;">
                         <a href="${loginUrl}" class="button">Login with New Password</a>
                     </div>
-                    
-                    <p style="margin-top: 20px; font-size: 14px; color: #666;">
-                        This email confirms that your password was changed on ${new Date().toLocaleString()}.
-                    </p>
                 </div>
                 <div class="footer">
                     <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
-                    <p>This is an automated message, please do not reply.</p>
                 </div>
             </div>
         </body>
@@ -512,7 +591,6 @@ app.post('/api/register', async (req, res) => {
             email
         } = req.body;
         
-        // Check if user already exists
         const existingUser = await User.findOne({ $or: [{ email }, { aadharNumber }] });
         if (existingUser) {
             return res.status(400).json({
@@ -521,10 +599,8 @@ app.post('/api/register', async (req, res) => {
             });
         }
         
-        // Generate default password
         const defaultPassword = generateDefaultPassword();
         
-        // Create new user with password
         const user = new User({
             name,
             fatherName,
@@ -547,7 +623,33 @@ app.post('/api/register', async (req, res) => {
         
         await user.save();
         
-        // Send welcome email to student
+        // Create initial progress record for the student
+        const initialProgress = new StudentProgress({
+            studentId: user._id,
+            registrationId: user.registrationId,
+            courseProgress: {
+                completed: 0,
+                totalModules: 12,
+                completedModules: 0,
+                currentModule: "Introduction to Beauty & Cosmetology",
+                nextModule: "Skin Care Fundamentals",
+                assignments: 3,
+                completedAssignments: 0,
+                moduleProgress: []
+            },
+            achievementPoints: 0,
+            certificateStatus: "Not Started",
+            recentActivities: [
+                {
+                    activity: `Registered for ${packageDetails} course`,
+                    date: new Date(),
+                    type: 'achievement'
+                }
+            ]
+        });
+        
+        await initialProgress.save();
+        
         await sendStudentWelcomeEmail({
             name,
             email,
@@ -603,7 +705,6 @@ app.post('/api/admins', async (req, res) => {
             });
         }
         
-        // Map role from UI to database enum
         let dbRole = 'employee';
         switch(role) {
             case 'super_admin':
@@ -617,10 +718,6 @@ app.post('/api/admins', async (req, res) => {
             case 'admin':
             case 'Admin':
                 dbRole = 'admin';
-                break;
-            case 'employee':
-            case 'Employee':
-                dbRole = 'employee';
                 break;
             default:
                 dbRole = role || 'employee';
@@ -639,7 +736,6 @@ app.post('/api/admins', async (req, res) => {
         
         await admin.save();
         
-        // Send welcome email to admin/employee
         await sendAdminWelcomeEmail({
             name,
             email,
@@ -666,7 +762,57 @@ app.post('/api/admins', async (req, res) => {
     }
 });
 
-// ==================== STUDENT FIRST-TIME PASSWORD CHANGE ====================
+// ==================== MIDDLEWARE ====================
+
+const verifyStudentToken = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: 'No token provided. Please login again.'
+            });
+        }
+        
+        let decoded;
+        try {
+            decoded = jwt.verify(token, JWT_SECRET);
+            if (decoded.role !== 'student') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access denied. Student only endpoint.'
+                });
+            }
+        } catch (err) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid or expired token'
+            });
+        }
+        
+        const user = await User.findById(decoded.id).select('-password');
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        
+        req.user = user;
+        next();
+    } catch (error) {
+        console.error('Token verification error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Authentication error',
+            error: error.message
+        });
+    }
+};
+
+// ==================== STUDENT PASSWORD CHANGE ====================
 
 app.post('/api/student/first-time-password', async (req, res) => {
     try {
@@ -727,16 +873,12 @@ app.post('/api/student/first-time-password', async (req, res) => {
             });
         }
         
-        // Update password
         user.password = newPassword;
         user.isPasswordChanged = true;
         user.lastPasswordChange = new Date();
         await user.save();
         
-        // Send confirmation email
         await sendPasswordChangeConfirmationEmail(user.email, user.name, 'student');
-        
-        console.log(`✅ Student first-time password changed for: ${user.email}`);
         
         res.status(200).json({
             success: true,
@@ -753,7 +895,7 @@ app.post('/api/student/first-time-password', async (req, res) => {
     }
 });
 
-// ==================== ADMIN FIRST-TIME PASSWORD CHANGE ====================
+// ==================== ADMIN PASSWORD CHANGE ====================
 
 app.post('/api/admin/first-time-password', async (req, res) => {
     try {
@@ -822,16 +964,12 @@ app.post('/api/admin/first-time-password', async (req, res) => {
             });
         }
         
-        // Update password
         admin.password = newPassword;
         admin.isPasswordChanged = true;
         admin.lastPasswordChange = new Date();
         await admin.save();
         
-        // Send confirmation email
         await sendPasswordChangeConfirmationEmail(admin.email, admin.name, 'staff');
-        
-        console.log(`✅ Admin first-time password changed for: ${admin.email}`);
         
         res.status(200).json({
             success: true,
@@ -849,79 +987,6 @@ app.post('/api/admin/first-time-password', async (req, res) => {
 });
 
 // ==================== STUDENT LOGIN API ====================
-
-// app.post('/api/user/login', async (req, res) => {
-//     try {
-//         const { email, password } = req.body;
-        
-//         if (!email || !password) {
-//             return res.status(400).json({
-//                 success: false,
-//                 message: 'Please provide email and password'
-//             });
-//         }
-        
-//         const user = await User.findOne({ email }).select('+password');
-        
-//         if (!user) {
-//             return res.status(401).json({
-//                 success: false,
-//                 message: 'Invalid credentials'
-//             });
-//         }
-        
-//         const isPasswordValid = await user.comparePassword(password);
-        
-//         if (!isPasswordValid) {
-//             user.loginAttempts = (user.loginAttempts || 0) + 1;
-//             if (user.loginAttempts >= 5) {
-//                 user.lockUntil = Date.now() + 30 * 60 * 1000;
-//                 await user.save();
-//                 return res.status(401).json({
-//                     success: false,
-//                     message: 'Account locked due to multiple failed attempts'
-//                 });
-//             }
-//             await user.save();
-//             return res.status(401).json({
-//                 success: false,
-//                 message: 'Invalid credentials'
-//             });
-//         }
-        
-//         // Reset login attempts
-//         user.loginAttempts = 0;
-//         user.lockUntil = undefined;
-//         await user.save();
-        
-//         const token = jwt.sign(
-//             { id: user._id, email: user.email, role: 'student', registrationId: user.registrationId },
-//             JWT_SECRET,
-//             { expiresIn: '7d' }
-//         );
-        
-//         const userData = user.toObject();
-//         delete userData.password;
-        
-//         res.status(200).json({
-//             success: true,
-//             message: 'Login successful',
-//             data: { 
-//                 user: userData, 
-//                 token,
-//                 requiresPasswordChange: !user.isPasswordChanged
-//             }
-//         });
-        
-//     } catch (error) {
-//         console.error('User login error:', error);
-//         res.status(500).json({
-//             success: false,
-//             message: 'Error logging in',
-//             error: error.message
-//         });
-//     }
-// });
 
 app.post('/api/user/login', async (req, res) => {
     try {
@@ -962,7 +1027,6 @@ app.post('/api/user/login', async (req, res) => {
             });
         }
         
-        // Reset login attempts
         user.loginAttempts = 0;
         user.lockUntil = undefined;
         await user.save();
@@ -982,7 +1046,7 @@ app.post('/api/user/login', async (req, res) => {
             data: { 
                 user: userData, 
                 token,
-                requiresPasswordChange: !user.isPasswordChanged  // Important flag
+                requiresPasswordChange: !user.isPasswordChanged
             }
         });
         
@@ -1044,7 +1108,6 @@ app.post('/api/login', async (req, res) => {
             });
         }
         
-        // Reset login attempts
         admin.loginAttempts = 0;
         admin.lockUntil = undefined;
         admin.lastLogin = new Date();
@@ -1079,9 +1142,141 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// ==================== PROFILE API ====================
+
+app.get('/api/student/profile', verifyStudentToken, async (req, res) => {
+    try {
+        const user = req.user;
+        
+        const profileData = {
+            registrationId: user.registrationId,
+            name: user.name,
+            fatherName: user.fatherName,
+            dateOfBirth: user.dateOfBirth,
+            aadharNumber: user.aadharNumber,
+            presentAddress: user.presentAddress,
+            permanentAddress: user.permanentAddress,
+            dateOfJoin: user.dateOfJoin,
+            packageDetails: user.packageDetails,
+            packageValue: user.packageValue,
+            packagePrice: user.packagePrice,
+            packageDuration: user.packageDuration,
+            contactNumber: user.contactNumber,
+            altContactNumber: user.altContactNumber,
+            email: user.email,
+            status: user.status,
+            isPasswordChanged: user.isPasswordChanged,
+            createdAt: user.createdAt,
+            lastPasswordChange: user.lastPasswordChange
+        };
+        
+        res.status(200).json({
+            success: true,
+            message: 'Profile data fetched successfully',
+            data: profileData
+        });
+        
+    } catch (error) {
+        console.error('Profile fetch error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching profile data',
+            error: error.message
+        });
+    }
+});
+
+// ==================== DASHBOARD STATS API ====================
+
+app.get('/api/student/dashboard-stats', verifyStudentToken, async (req, res) => {
+    try {
+        const user = req.user;
+        
+        let progress = await StudentProgress.findOne({ studentId: user._id });
+        
+        if (!progress) {
+            progress = new StudentProgress({
+                studentId: user._id,
+                registrationId: user.registrationId,
+                courseProgress: {
+                    completed: 0,
+                    totalModules: 12,
+                    completedModules: 0,
+                    currentModule: "Introduction to Beauty & Cosmetology",
+                    nextModule: "Skin Care Fundamentals",
+                    assignments: 3,
+                    completedAssignments: 0,
+                    moduleProgress: []
+                },
+                achievementPoints: 0,
+                certificateStatus: "Not Started",
+                recentActivities: [
+                    {
+                        activity: `Started ${user.packageDetails} course`,
+                        date: new Date(),
+                        type: 'achievement'
+                    }
+                ]
+            });
+            await progress.save();
+        }
+        
+        const assignments = await Assignment.find({ studentId: user._id }).sort({ dueDate: -1 });
+        const totalAssignments = assignments.length;
+        const completedAssignments = assignments.filter(a => a.status === 'submitted' || a.status === 'graded').length;
+        
+        progress.courseProgress.assignments = totalAssignments || 3;
+        progress.courseProgress.completedAssignments = completedAssignments;
+        
+        const totalModulesCount = progress.courseProgress.totalModules;
+        const completedModulesCount = progress.courseProgress.completedModules;
+        const progressPercentage = totalModulesCount > 0 
+            ? Math.round((completedModulesCount / totalModulesCount) * 100) 
+            : 0;
+        
+        progress.courseProgress.completed = progressPercentage;
+        
+        if (progressPercentage === 100) {
+            progress.certificateStatus = 'Eligible';
+        } else if (progressPercentage > 0) {
+            progress.certificateStatus = 'In Progress';
+        }
+        
+        await progress.save();
+        
+        const recentActivities = progress.recentActivities
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 5);
+        
+        const stats = {
+            courseProgress: progress.courseProgress,
+            achievementPoints: progress.achievementPoints,
+            certificateStatus: progress.certificateStatus,
+            recentActivities: recentActivities.map(activity => ({
+                activity: activity.activity,
+                date: new Date(activity.date).toISOString().split('T')[0],
+                type: activity.type
+            }))
+        };
+        
+        res.status(200).json({
+            success: true,
+            message: 'Dashboard statistics fetched successfully',
+            data: stats
+        });
+        
+    } catch (error) {
+        console.error('Dashboard stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching dashboard statistics',
+            error: error.message
+        });
+    }
+});
+
 // ==================== OTHER API ENDPOINTS ====================
 
-// Health Check
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
@@ -1090,7 +1285,6 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Get all admins
 app.get('/api/admins', async (req, res) => {
     try {
         const admins = await Admin.find().select('-password -loginAttempts -lockUntil').sort({ createdAt: -1 });
@@ -1108,7 +1302,6 @@ app.get('/api/admins', async (req, res) => {
     }
 });
 
-// Get all students
 app.get('/api/users', async (req, res) => {
     try {
         const users = await User.find().select('-password').sort({ createdAt: -1 });
@@ -1126,7 +1319,8 @@ app.get('/api/users', async (req, res) => {
     }
 });
 
-// Start Server
+// ==================== START SERVER ====================
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`\n🚀 Server running on http://localhost:${PORT}`);
@@ -1135,6 +1329,8 @@ app.listen(PORT, () => {
     console.log(`\n👤 Student APIs:`);
     console.log(`   POST   /api/register - Register new student`);
     console.log(`   POST   /api/user/login - Student login`);
+    console.log(`   GET    /api/student/profile - Get student profile`);
+    console.log(`   GET    /api/student/dashboard-stats - Get dashboard stats`);
     console.log(`   POST   /api/student/first-time-password - Student first-time password change`);
     console.log(`\n👨‍💼 Admin APIs:`);
     console.log(`   POST   /api/admins - Create admin/employee`);
