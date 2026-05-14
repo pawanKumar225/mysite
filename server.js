@@ -1,4 +1,3 @@
-// server.js - Complete working version with proper email functionality
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -6,7 +5,6 @@ const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
-
 const app = express();
 
 // Middleware
@@ -38,33 +36,202 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// ==================== USER SCHEMA WITH PASSWORD ====================
+// ==================== SCHEMAS ====================
+
+// User Schema (UPDATED with Payment Fields)
+// User Schema (FIXED - Allows null for payment fields)
 const userSchema = new mongoose.Schema({
+    // Personal Information
     registrationId: { type: String, unique: true },
     name: { type: String, required: true, trim: true },
     fatherName: { type: String, required: true, trim: true },
     dateOfBirth: { type: Date, required: true },
-    aadharNumber: { type: String, required: true, unique: true, match: [/^\d{12}$/, 'Aadhar number must be 12 digits'] },
+    aadharNumber: { type: String, required: true, unique: true },
     presentAddress: { type: String, required: true, trim: true },
     permanentAddress: { type: String, required: true, trim: true },
+    
+    // Course Information
     dateOfJoin: { type: Date, required: true },
     packageDetails: { type: String, required: true },
     packageValue: { type: String },
     packagePrice: { type: String },
     packageDuration: { type: String },
-    contactNumber: { type: String, required: true, match: [/^\d{10}$/, 'Contact number must be 10 digits'] },
-    altContactNumber: { type: String, match: [/^\d{10}$/, 'Alternative number must be 10 digits'] },
+    
+    // Contact Information
+    contactNumber: { type: String, required: true },
+    altContactNumber: { type: String },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    
+    // Account Information
     password: { type: String, required: true, select: false },
     isPasswordChanged: { type: Boolean, default: false },
     lastPasswordChange: { type: Date },
-    status: { type: String, enum: ['pending', 'approved', 'rejected', 'active'], default: 'pending' },
+    
+    // Payment Fields - Allow null/undefined for new registrations
+    paymentStatus: { 
+        type: String, 
+        enum: ['completed', 'pending', 'failed'], 
+        default: 'pending' 
+    },
+    paymentDate: { type: Date, default: null },
+    paymentMethod: { 
+        type: String,
+        enum: ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'],
+        default: null
+    },
+    transactionId: { 
+        type: String,
+        unique: true,
+        sparse: true,
+        trim: true,
+        default: null
+    },
+    paymentAmount: { type: Number, default: 0 },
+    
+    // Status Information
+    status: { 
+        type: String, 
+        enum: ['pending', 'approved', 'rejected', 'active'], 
+        default: 'pending' 
+    },
+    
+    // Security Information
     loginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date },
+    
+    // Timestamps
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+}, { 
+    timestamps: true 
+});
+
+// Add this validation to handle null values properly
+userSchema.path('paymentMethod').validate(function(value) {
+    // Allow null or undefined for new registrations
+    if (value === null || value === undefined) return true;
+    // Valid enum values
+    const validMethods = ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'];
+    return validMethods.includes(value);
+}, 'Invalid payment method');
+
+// Student Progress Schema
+const studentProgressSchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    registrationId: { type: String, required: true },
+    courseProgress: {
+        completed: { type: Number, default: 0 },
+        totalModules: { type: Number, default: 0 },
+        completedModules: { type: Number, default: 0 },
+        currentModule: { type: String, default: "" },
+        nextModule: { type: String, default: "" },
+        assignments: { type: Number, default: 0 },
+        completedAssignments: { type: Number, default: 0 },
+        moduleProgress: [{
+            moduleName: String,
+            moduleNumber: Number,
+            isCompleted: { type: Boolean, default: false },
+            completedAt: Date,
+            score: { type: Number, default: 0 }
+        }]
+    },
+    achievementPoints: { type: Number, default: 0 },
+    certificateStatus: { type: String, enum: ['Not Started', 'In Progress', 'Eligible', 'Issued'], default: 'Not Started' },
+    recentActivities: [{
+        activity: String,
+        date: { type: Date, default: Date.now },
+        type: { type: String, enum: ['module', 'assignment', 'security', 'achievement'] }
+    }],
+    lastUpdated: { type: Date, default: Date.now }
+});
+
+// Assignment Schema
+const assignmentSchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    registrationId: { type: String, required: true },
+    assignmentName: { type: String, required: true },
+    description: String,
+    dueDate: Date,
+    submittedAt: Date,
+    status: { type: String, enum: ['pending', 'submitted', 'graded', 'late'], default: 'pending' },
+    grade: { type: Number, min: 0, max: 100 },
+    feedback: String,
+    points: { type: Number, default: 0 }
+});
+
+// Module Completion Schema
+const moduleCompletionSchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    registrationId: { type: String, required: true },
+    moduleName: { type: String, required: true },
+    moduleNumber: { type: Number, required: true },
+    completedAt: { type: Date, default: Date.now },
+    score: { type: Number, default: 0 },
+    timeSpent: { type: Number, default: 0 }
+});
+
+// Admin Schema
+const adminSchema = new mongoose.Schema({
+    employeeId: { type: String, unique: true, sparse: true },
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    password: { type: String, required: true, select: false },
+    role: { type: String, enum: ['super_admin', 'hr_manager', 'admin', 'employee'], default: 'employee' },
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now },
+    lastLogin: { type: Date },
+    isPasswordChanged: { type: Boolean, default: false },
+    phone: { type: String, trim: true, default: '' },
+    department: { type: String, default: 'General' },
+    salary: { type: String, default: '$0' },
+    loginAttempts: { type: Number, default: 0 },
+    lockUntil: { type: Date }
+});
+
+// Notification Schema
+const notificationSchema = new mongoose.Schema({
+    recipientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', required: true },
+    recipientRole: { type: String, enum: ['super_admin', 'hr_manager', 'admin'], required: true },
+    title: { type: String, required: true },
+    message: { type: String, required: true },
+    type: { type: String, enum: ['registration', 'approval', 'rejection', 'system'], default: 'registration' },
+    relatedId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    isRead: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
 });
 
-// Generate registration ID
+// Approval History Schema
+const approvalHistorySchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    registrationId: { type: String, required: true },
+    studentName: { type: String, required: true },
+    studentEmail: { type: String, required: true },
+    action: { type: String, enum: ['approved', 'rejected', 'pending'], required: true },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    approvedByName: { type: String },
+    approvedByRole: { type: String },
+    remarks: { type: String },
+    createdAt: { type: Date, default: Date.now }
+});
+
+// Payment Schema
+const paymentSchema = new mongoose.Schema({
+    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    studentName: { type: String, required: true },
+    registrationId: { type: String, required: true },
+    amount: { type: Number, required: true, min: 0 },
+    paymentDate: { type: Date, default: Date.now },
+    status: { type: String, enum: ['completed', 'pending', 'failed'], default: 'pending' },
+    paymentMethod: { type: String, enum: ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'], required: true },
+    transactionId: { type: String, unique: true, sparse: true },
+    remarks: { type: String },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+// ==================== PRE-SAVE HOOKS ====================
+
+// Generate registration ID for User
 userSchema.pre('save', async function(next) {
     if (this.isNew && !this.registrationId) {
         const prefix = 'IBA';
@@ -84,7 +251,7 @@ userSchema.pre('save', async function(next) {
     next();
 });
 
-// Hash password before saving
+// Hash password for User
 userSchema.pre('save', async function(next) {
     if (!this.isModified('password')) return next();
     try {
@@ -96,108 +263,7 @@ userSchema.pre('save', async function(next) {
     }
 });
 
-// Compare password method
-userSchema.methods.comparePassword = async function(candidatePassword) {
-    return await bcrypt.compare(candidatePassword, this.password);
-};
-
-// Check if account is locked
-userSchema.methods.isLocked = function() {
-    return this.lockUntil && this.lockUntil > Date.now();
-};
-
-// ==================== STUDENT PROGRESS SCHEMA ====================
-const studentProgressSchema = new mongoose.Schema({
-    studentId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User', 
-        required: true,
-        unique: true 
-    },
-    registrationId: { type: String, required: true },
-    courseProgress: {
-        completed: { type: Number, default: 0 },
-        totalModules: { type: Number, default: 0 },
-        completedModules: { type: Number, default: 0 },
-        currentModule: { type: String, default: "" },
-        nextModule: { type: String, default: "" },
-        assignments: { type: Number, default: 0 },
-        completedAssignments: { type: Number, default: 0 },
-        moduleProgress: [{
-            moduleName: String,
-            moduleNumber: Number,
-            isCompleted: { type: Boolean, default: false },
-            completedAt: Date,
-            score: { type: Number, default: 0 }
-        }]
-    },
-    achievementPoints: { type: Number, default: 0 },
-    certificateStatus: { 
-        type: String, 
-        enum: ['Not Started', 'In Progress', 'Eligible', 'Issued'],
-        default: 'Not Started'
-    },
-    recentActivities: [{
-        activity: String,
-        date: { type: Date, default: Date.now },
-        type: { type: String, enum: ['module', 'assignment', 'security', 'achievement'] }
-    }],
-    lastUpdated: { type: Date, default: Date.now }
-});
-
-// Assignment Schema
-const assignmentSchema = new mongoose.Schema({
-    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    registrationId: { type: String, required: true },
-    assignmentName: { type: String, required: true },
-    description: String,
-    dueDate: Date,
-    submittedAt: Date,
-    status: { 
-        type: String, 
-        enum: ['pending', 'submitted', 'graded', 'late'],
-        default: 'pending'
-    },
-    grade: { type: Number, min: 0, max: 100 },
-    feedback: String,
-    points: { type: Number, default: 0 }
-});
-
-// Module Completion Schema
-const moduleCompletionSchema = new mongoose.Schema({
-    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    registrationId: { type: String, required: true },
-    moduleName: { type: String, required: true },
-    moduleNumber: { type: Number, required: true },
-    completedAt: { type: Date, default: Date.now },
-    score: { type: Number, default: 0 },
-    timeSpent: { type: Number, default: 0 }
-});
-
-const StudentProgress = mongoose.model('StudentProgress', studentProgressSchema);
-const Assignment = mongoose.model('Assignment', assignmentSchema);
-const ModuleCompletion = mongoose.model('ModuleCompletion', moduleCompletionSchema);
-const User = mongoose.model('User', userSchema);
-
-// ==================== ADMIN SCHEMA ====================
-const adminSchema = new mongoose.Schema({
-    employeeId: { type: String, unique: true, sparse: true },
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    password: { type: String, required: true, select: false },
-    role: { type: String, enum: ['super_admin', 'hr_manager', 'admin', 'employee'], default: 'employee' },
-    isActive: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now },
-    lastLogin: { type: Date },
-    isPasswordChanged: { type: Boolean, default: false },
-    phone: { type: String, trim: true, default: '' },
-    department: { type: String, default: 'General' },
-    salary: { type: String, default: '$0' },
-    loginAttempts: { type: Number, default: 0 },
-    lockUntil: { type: Date }
-});
-
-// Generate employee ID
+// Generate employee ID for Admin
 adminSchema.pre('save', async function(next) {
     if (this.isNew && !this.employeeId) {
         const prefix = 'IBA';
@@ -217,7 +283,7 @@ adminSchema.pre('save', async function(next) {
     next();
 });
 
-// Hash password middleware
+// Hash password for Admin
 adminSchema.pre('save', async function(next) {
     if (!this.isModified('password')) return next();
     try {
@@ -229,19 +295,29 @@ adminSchema.pre('save', async function(next) {
     }
 });
 
+// ==================== METHODS ====================
+
+userSchema.methods.comparePassword = async function(candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
+};
+
 adminSchema.methods.comparePassword = async function(candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
-adminSchema.methods.isLocked = function() {
-    return this.lockUntil && this.lockUntil > Date.now();
-};
+// ==================== MODELS ====================
 
+const User = mongoose.model('User', userSchema);
+const StudentProgress = mongoose.model('StudentProgress', studentProgressSchema);
+const Assignment = mongoose.model('Assignment', assignmentSchema);
+const ModuleCompletion = mongoose.model('ModuleCompletion', moduleCompletionSchema);
 const Admin = mongoose.model('Admin', adminSchema);
+const Notification = mongoose.model('Notification', notificationSchema);
+const ApprovalHistory = mongoose.model('ApprovalHistory', approvalHistorySchema);
+const Payment = mongoose.model('Payment', paymentSchema);
 
 // ==================== HELPER FUNCTIONS ====================
 
-// Generate random default password
 const generateDefaultPassword = () => {
     const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const lowercase = 'abcdefghijklmnopqrstuvwxyz';
@@ -262,125 +338,162 @@ const generateDefaultPassword = () => {
     return password.split('').sort(() => 0.5 - Math.random()).join('');
 };
 
-// Helper function to add activity
-async function addStudentActivity(studentId, activity, type) {
+// Send notification to all admins
+async function sendNotificationToAdmins(title, message, type, relatedId = null) {
     try {
-        const progress = await StudentProgress.findOne({ studentId });
-        if (progress) {
-            progress.recentActivities.unshift({
-                activity,
-                date: new Date(),
-                type
-            });
-            
-            if (progress.recentActivities.length > 20) {
-                progress.recentActivities = progress.recentActivities.slice(0, 20);
-            }
-            
-            await progress.save();
+        const admins = await Admin.find({ 
+            role: { $in: ['super_admin', 'hr_manager', 'admin'] },
+            isActive: true 
+        });
+        
+        const notifications = admins.map(admin => ({
+            recipientId: admin._id,
+            recipientRole: admin.role,
+            title,
+            message,
+            type,
+            relatedId,
+            isRead: false,
+            createdAt: new Date()
+        }));
+        
+        if (notifications.length > 0) {
+            await Notification.insertMany(notifications);
         }
+        
+        console.log(`📧 Notifications sent to ${notifications.length} admins`);
+        return { success: true, count: notifications.length };
     } catch (error) {
-        console.error('Error adding activity:', error);
+        console.error('Error sending notifications:', error);
+        return { success: false, error: error.message };
     }
 }
 
-// Helper function to add achievement points
-async function addAchievementPoints(studentId, points, reason) {
+// Send email notification to admin
+async function sendAdminEmailNotification(adminEmail, adminName, studentName, studentEmail, registrationId) {
+    const emailHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>New Student Registration - Action Required</title>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 30px; text-align: center; }
+                .content { background: #f9f9f9; padding: 30px; }
+                .button { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; border-radius: 5px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header"><h1>New Student Registration! 🎓</h1></div>
+                <div class="content">
+                    <h2>Dear ${adminName},</h2>
+                    <p>A new student has registered and is awaiting your approval.</p>
+                    <div style="background: white; padding: 15px; border-radius: 8px;">
+                        <p><strong>Name:</strong> ${studentName}</p>
+                        <p><strong>Email:</strong> ${studentEmail}</p>
+                        <p><strong>Registration ID:</strong> ${registrationId}</p>
+                    </div>
+                    <div style="text-align: center;">
+                        <a href="http://localhost:5173/admin/approvals" class="button">Review Registration</a>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    
     try {
-        const progress = await StudentProgress.findOne({ studentId });
-        if (progress) {
-            progress.achievementPoints += points;
-            
-            progress.recentActivities.unshift({
-                activity: `Earned ${points} points: ${reason}`,
-                date: new Date(),
-                type: 'achievement'
-            });
-            
-            await progress.save();
-        }
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: adminEmail,
+            subject: `New Student Registration - Action Required (${registrationId})`,
+            html: emailHTML
+        });
+        console.log(`✅ Admin email sent to: ${adminEmail}`);
+        return { success: true };
     } catch (error) {
-        console.error('Error adding points:', error);
+        console.error('❌ Admin email failed:', error);
+        return { success: false };
     }
 }
 
-// ==================== EMAIL FUNCTIONS ====================
+// Send email to student about approval/rejection
+async function sendStudentApprovalEmail(studentEmail, studentName, registrationId, status, remarks = '') {
+    const isApproved = status === 'approved';
+    const headerColor = isApproved ? 'linear-gradient(135deg, #4caf50, #45a049)' : 'linear-gradient(135deg, #f44336, #da190b)';
+    const title = isApproved ? 'Registration Approved! ✅' : 'Registration Update 📋';
+    const message = isApproved 
+        ? 'Congratulations! Your registration has been approved. You can now access the student portal.'
+        : 'We regret to inform you that your registration cannot be approved at this time.';
+    
+    const emailHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="UTF-8"><title>Registration ${isApproved ? 'Approved' : 'Update'}</title></head>
+        <body>
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: ${headerColor}; color: white; padding: 30px; text-align: center;">
+                    <h1>${title}</h1>
+                </div>
+                <div style="background: #f9f9f9; padding: 30px;">
+                    <h2>Dear ${studentName},</h2>
+                    <p>${message}</p>
+                    <div style="background: white; padding: 15px;">
+                        <p><strong>Registration ID:</strong> ${registrationId}</p>
+                        <p><strong>Status:</strong> ${status.toUpperCase()}</p>
+                    </div>
+                    ${remarks ? `<div style="background: #fff3cd; padding: 15px;"><strong>Remarks:</strong> ${remarks}</div>` : ''}
+                    ${isApproved ? `<div style="text-align: center;"><a href="http://localhost:5173/user/login" style="display: inline-block; padding: 12px 30px; background: ${headerColor}; color: white; text-decoration: none;">Login to Student Portal</a></div>` : ''}
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    try {
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: studentEmail,
+            subject: `Registration ${isApproved ? 'Approved' : 'Update'} - ${registrationId}`,
+            html: emailHTML
+        });
+        console.log(`✅ Student ${status} email sent to: ${studentEmail}`);
+        return { success: true };
+    } catch (error) {
+        console.error(`❌ Student email failed:`, error);
+        return { success: false };
+    }
+}
 
-// Send welcome email to STUDENT
+// Send welcome email to student
 const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
     const { name, email, registrationId, packageDetails, dateOfJoin } = userData;
     
     const emailHTML = `
         <!DOCTYPE html>
         <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Welcome to Intense Beauty Academy</title>
-            <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
-                .header { background: linear-gradient(135deg, #ff6b6b, #ff8e8e); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                .credentials { background: #fff3cd; border: 1px solid #ffc107; padding: 20px; border-radius: 8px; margin: 20px 0; }
-                .credential-item { margin: 12px 0; font-size: 16px; }
-                .credential-label { font-weight: bold; color: #ff6b6b; min-width: 140px; display: inline-block; }
-                .credential-value { font-family: monospace; font-size: 16px; background: white; padding: 5px 10px; border-radius: 5px; font-weight: bold; }
-                .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0; }
-                .button { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff6b6b, #ff8e8e); color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }
-                .footer { text-align: center; padding: 20px; font-size: 12px; color: #999; }
-            </style>
-        </head>
+        <head><meta charset="UTF-8"><title>Welcome to Intense Beauty Academy</title></head>
         <body>
-            <div class="container">
-                <div class="header">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #ff6b6b, #ff8e8e); color: white; padding: 30px; text-align: center;">
                     <h1>Welcome to Intense Beauty Academy! 🎓</h1>
-                    <p>Your registration has been confirmed</p>
                 </div>
-                <div class="content">
+                <div style="background: white; padding: 30px;">
                     <h2>Dear ${name},</h2>
-                    <p>Thank you for registering at Intense Beauty Academy. We are excited to have you on board!</p>
-                    
-                    <div class="credentials">
-                        <h3>📋 Your Login Credentials:</h3>
-                        <div class="credential-item">
-                            <span class="credential-label">🆔 Registration ID:</span>
-                            <span class="credential-value">${registrationId}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">📧 Email:</span>
-                            <span class="credential-value">${email}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">🔑 Default Password:</span>
-                            <span class="credential-value">${defaultPassword}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">📚 Course Package:</span>
-                            <span class="credential-value">${packageDetails}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">📅 Date of Joining:</span>
-                            <span class="credential-value">${new Date(dateOfJoin).toLocaleDateString()}</span>
-                        </div>
+                    <p>Thank you for registering at Intense Beauty Academy.</p>
+                    <div style="background: #fff3cd; padding: 20px;">
+                        <p><strong>Registration ID:</strong> ${registrationId}</p>
+                        <p><strong>Email:</strong> ${email}</p>
+                        <p><strong>Default Password:</strong> ${defaultPassword}</p>
+                        <p><strong>Course Package:</strong> ${packageDetails}</p>
                     </div>
-                    
-                    <div class="warning">
-                        <strong>⚠️ Important Security Notice:</strong>
-                        <ul>
-                            <li>This is your default password. Please change it after your first login.</li>
-                            <li>Never share your password with anyone.</li>
-                        </ul>
-                    </div>
-                    
+                    <p><strong>Important:</strong> Please change your password after first login.</p>
                     <div style="text-align: center;">
-                        <a href="http://localhost:5173/user/login" class="button">🔐 Login to Student Portal</a>
+                        <a href="http://localhost:5173/user/login" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff6b6b, #ff8e8e); color: white; text-decoration: none;">Login to Student Portal</a>
                     </div>
-                    
-                    <p>For any queries, please contact us at support@intensebeautyacademy.com</p>
-                </div>
-                <div class="footer">
-                    <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
                 </div>
             </div>
         </body>
@@ -397,926 +510,764 @@ const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
         console.log('✅ Student welcome email sent to:', email);
         return { success: true };
     } catch (error) {
-        console.error('❌ Student email sending failed:', error);
-        return { success: false, error: error.message };
-    }
-};
-
-// Send welcome email to ADMIN/EMPLOYEE
-const sendAdminWelcomeEmail = async (userData, defaultPassword) => {
-    const { name, email, role, employeeId } = userData;
-    
-    const roleDisplay = {
-        'super_admin': 'Super Administrator',
-        'hr_manager': 'HR Manager',
-        'admin': 'Administrator',
-        'employee': 'Employee'
-    };
-    
-    const emailHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Welcome to Intense Beauty Academy - Staff Portal</title>
-            <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
-                .header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                .credentials { background: #f0f4ff; border: 1px solid #667eea; padding: 20px; border-radius: 8px; margin: 20px 0; }
-                .credential-item { margin: 12px 0; font-size: 16px; }
-                .credential-label { font-weight: bold; color: #667eea; min-width: 140px; display: inline-block; }
-                .credential-value { font-family: monospace; font-size: 16px; background: white; padding: 5px 10px; border-radius: 5px; font-weight: bold; }
-                .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 5px; margin: 20px 0; }
-                .button { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }
-                .footer { text-align: center; padding: 20px; font-size: 12px; color: #999; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Welcome to Intense Beauty Academy! 👋</h1>
-                    <p>Your staff account has been created</p>
-                </div>
-                <div class="content">
-                    <h2>Dear ${name},</h2>
-                    <p>Welcome to the Intense Beauty Academy team! Your staff account has been created successfully.</p>
-                    
-                    <div class="credentials">
-                        <h3>📋 Your Account Details:</h3>
-                        <div class="credential-item">
-                            <span class="credential-label">🆔 Employee ID:</span>
-                            <span class="credential-value">${employeeId}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">📧 Email:</span>
-                            <span class="credential-value">${email}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">🔑 Default Password:</span>
-                            <span class="credential-value">${defaultPassword}</span>
-                        </div>
-                        <div class="credential-item">
-                            <span class="credential-label">👔 Role:</span>
-                            <span class="credential-value">${roleDisplay[role] || role}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="warning">
-                        <strong>⚠️ Important Security Notice:</strong>
-                        <ul>
-                            <li>This is your default password. You must change it on first login.</li>
-                            <li>Never share your credentials with anyone.</li>
-                        </ul>
-                    </div>
-                    
-                    <div style="text-align: center;">
-                        <a href="http://localhost:5173/admin/login" class="button">🔐 Login to Staff Portal</a>
-                    </div>
-                    
-                    <p>For any queries, please contact the system administrator.</p>
-                </div>
-                <div class="footer">
-                    <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
-    
-    try {
-        await transporter.sendMail({
-            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: `Welcome to Intense Beauty Academy - Your Staff Account (ID: ${employeeId})`,
-            html: emailHTML
-        });
-        console.log('✅ Admin welcome email sent to:', email);
-        return { success: true };
-    } catch (error) {
-        console.error('❌ Admin email sending failed:', error);
-        return { success: false, error: error.message };
-    }
-};
-
-// Send password change confirmation email
-const sendPasswordChangeConfirmationEmail = async (email, name, userType = 'staff') => {
-    const isStudent = userType === 'student';
-    const loginUrl = isStudent ? 'http://localhost:5173/user/login' : 'http://localhost:5173/admin/login';
-    const headerColor = isStudent ? 'linear-gradient(135deg, #ff6b6b, #ff8e8e)' : 'linear-gradient(135deg, #667eea, #764ba2)';
-    
-    const emailHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Password Changed Successfully</title>
-            <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; }
-                .header { background: ${headerColor}; color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                .content { background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                .success-icon { text-align: center; font-size: 48px; margin: 20px 0; }
-                .button { display: inline-block; padding: 12px 30px; background: ${headerColor}; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; font-weight: bold; }
-                .footer { text-align: center; padding: 20px; font-size: 12px; color: #999; }
-                .info-box { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 15px; margin: 20px 0; border-radius: 5px; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Password Changed Successfully! 🔐</h1>
-                </div>
-                <div class="content">
-                    <div class="success-icon">✅</div>
-                    <h2>Dear ${name},</h2>
-                    <p>Your password has been successfully changed.</p>
-                    
-                    <div class="info-box">
-                        <strong>📋 What's Next:</strong>
-                        <ul>
-                            <li>Use your new password for all future logins</li>
-                            <li>Keep your password secure and don't share it with anyone</li>
-                        </ul>
-                    </div>
-                    
-                    <div style="text-align: center;">
-                        <a href="${loginUrl}" class="button">Login with New Password</a>
-                    </div>
-                </div>
-                <div class="footer">
-                    <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
-    
-    try {
-        await transporter.sendMail({
-            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: 'Password Changed Successfully - Intense Beauty Academy',
-            html: emailHTML
-        });
-        console.log(`✅ Password change confirmation email sent to ${userType}:`, email);
-        return { success: true };
-    } catch (error) {
-        console.error('❌ Password change email sending failed:', error);
+        console.error('❌ Student email failed:', error);
         return { success: false };
     }
 };
-
-// ==================== REGISTRATION API (STUDENT) ====================
-
-app.post('/api/register', async (req, res) => {
-    try {
-        const {
-            name,
-            fatherName,
-            dateOfBirth,
-            aadharNumber,
-            presentAddress,
-            permanentAddress,
-            dateOfJoin,
-            packageDetails,
-            packageValue,
-            packagePrice,
-            packageDuration,
-            contactNumber,
-            altContactNumber,
-            email
-        } = req.body;
-        
-        const existingUser = await User.findOne({ $or: [{ email }, { aadharNumber }] });
-        if (existingUser) {
-            return res.status(400).json({
-                success: false,
-                message: 'User with this email or Aadhar number already exists'
-            });
-        }
-        
-        const defaultPassword = generateDefaultPassword();
-        
-        const user = new User({
-            name,
-            fatherName,
-            dateOfBirth: new Date(dateOfBirth),
-            aadharNumber,
-            presentAddress,
-            permanentAddress,
-            dateOfJoin: new Date(dateOfJoin),
-            packageDetails,
-            packageValue,
-            packagePrice,
-            packageDuration,
-            contactNumber,
-            altContactNumber,
-            email: email.toLowerCase(),
-            password: defaultPassword,
-            isPasswordChanged: false,
-            status: 'pending'
-        });
-        
-        await user.save();
-        
-        // Create initial progress record for the student
-        const initialProgress = new StudentProgress({
-            studentId: user._id,
-            registrationId: user.registrationId,
-            courseProgress: {
-                completed: 0,
-                totalModules: 12,
-                completedModules: 0,
-                currentModule: "Introduction to Beauty & Cosmetology",
-                nextModule: "Skin Care Fundamentals",
-                assignments: 3,
-                completedAssignments: 0,
-                moduleProgress: []
-            },
-            achievementPoints: 0,
-            certificateStatus: "Not Started",
-            recentActivities: [
-                {
-                    activity: `Registered for ${packageDetails} course`,
-                    date: new Date(),
-                    type: 'achievement'
-                }
-            ]
-        });
-        
-        await initialProgress.save();
-        
-        await sendStudentWelcomeEmail({
-            name,
-            email,
-            registrationId: user.registrationId,
-            packageDetails,
-            dateOfJoin
-        }, defaultPassword);
-        
-        const userResponse = user.toObject();
-        delete userResponse.password;
-        
-        res.status(201).json({
-            success: true,
-            message: 'Registration successful! Login credentials sent to your email.',
-            data: {
-                registrationId: userResponse.registrationId,
-                name: userResponse.name,
-                email: userResponse.email,
-                packageDetails: userResponse.packageDetails,
-                dateOfJoin: userResponse.dateOfJoin,
-                status: userResponse.status
-            }
-        });
-        
-    } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error during registration',
-            error: error.message
-        });
-    }
-});
-
-// ==================== CREATE ADMIN API ====================
-
-app.post('/api/admins', async (req, res) => {
-    try {
-        const { name, email, role } = req.body;
-        
-        if (!name || !email) {
-            return res.status(400).json({
-                success: false,
-                message: 'Name and email are required'
-            });
-        }
-        
-        const existingAdmin = await Admin.findOne({ email });
-        if (existingAdmin) {
-            return res.status(400).json({
-                success: false,
-                message: 'User with this email already exists'
-            });
-        }
-        
-        let dbRole = 'employee';
-        switch(role) {
-            case 'super_admin':
-            case 'Super Admin':
-                dbRole = 'super_admin';
-                break;
-            case 'hr_manager':
-            case 'HR Manager':
-                dbRole = 'hr_manager';
-                break;
-            case 'admin':
-            case 'Admin':
-                dbRole = 'admin';
-                break;
-            default:
-                dbRole = role || 'employee';
-        }
-        
-        const defaultPassword = generateDefaultPassword();
-        
-        const admin = new Admin({ 
-            name, 
-            email, 
-            password: defaultPassword, 
-            role: dbRole,
-            isActive: true,
-            isPasswordChanged: false
-        });
-        
-        await admin.save();
-        
-        await sendAdminWelcomeEmail({
-            name,
-            email,
-            role: dbRole,
-            employeeId: admin.employeeId
-        }, defaultPassword);
-        
-        const adminResponse = admin.toObject();
-        delete adminResponse.password;
-        
-        res.status(201).json({
-            success: true,
-            message: 'User created successfully. Login credentials sent to email.',
-            data: adminResponse
-        });
-        
-    } catch (error) {
-        console.error('Create admin error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error creating user',
-            error: error.message
-        });
-    }
-});
 
 // ==================== MIDDLEWARE ====================
 
 const verifyStudentToken = async (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
         
-        if (!token) {
-            return res.status(401).json({
-                success: false,
-                message: 'No token provided. Please login again.'
-            });
-        }
-        
-        let decoded;
-        try {
-            decoded = jwt.verify(token, JWT_SECRET);
-            if (decoded.role !== 'student') {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. Student only endpoint.'
-                });
-            }
-        } catch (err) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid or expired token'
-            });
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.role !== 'student') {
+            return res.status(403).json({ success: false, message: 'Access denied' });
         }
         
         const user = await User.findById(decoded.id).select('-password');
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
+        if (!user) return res.status(404).json({ success: false, message: 'User not found' });
         
         req.user = user;
         next();
     } catch (error) {
-        console.error('Token verification error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Authentication error',
-            error: error.message
-        });
+        res.status(401).json({ success: false, message: 'Invalid or expired token' });
     }
 };
 
-// ==================== STUDENT PASSWORD CHANGE ====================
-
-app.post('/api/student/first-time-password', async (req, res) => {
+const verifyAdminToken = async (req, res, next) => {
     try {
         const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
         
-        if (!token) {
-            return res.status(401).json({
-                success: false,
-                message: 'No token provided. Please login again.'
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded.type !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+        
+        const admin = await Admin.findById(decoded.id).select('-password');
+        if (!admin) return res.status(404).json({ success: false, message: 'Admin not found' });
+        
+        req.admin = admin;
+        next();
+    } catch (error) {
+        res.status(401).json({ success: false, message: 'Invalid or expired token' });
+    }
+};
+
+// ==================== API ENDPOINTS ====================
+
+// Student Registration
+// Student Registration (UPDATED with Payment Fields)
+app.post('/api/register', async (req, res) => {
+    try {
+        const { 
+            name, fatherName, dateOfBirth, aadharNumber, presentAddress, permanentAddress,
+            dateOfJoin, packageDetails, packageValue, packagePrice, packageDuration,
+            contactNumber, altContactNumber, email,
+            // Payment fields
+            paymentMethod, paymentAmount, transactionId, paymentStatus
+        } = req.body;
+        
+        // Validate payment amount
+        const packagePriceNum = parseInt(packagePrice ? packagePrice.replace(/[^0-9]/g, '') : 0);
+        const paidAmount = paymentAmount || 0;
+        
+        if (paidAmount > packagePriceNum) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Paid amount cannot exceed package price' 
             });
         }
         
-        let decoded;
-        try {
-            decoded = jwt.verify(token, JWT_SECRET);
-            if (decoded.role !== 'student') {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. Student only endpoint.'
-                });
-            }
-        } catch (err) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid or expired token'
+        // Validate transaction ID for UPI payments
+        if (paymentMethod === 'UPI' && !transactionId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Transaction ID is required for UPI/Online payments' 
             });
         }
         
-        const { newPassword, confirmPassword } = req.body;
-        
-        if (!newPassword || !confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'New password and confirm password are required'
-            });
+        const existingUser = await User.findOne({ $or: [{ email }, { aadharNumber }] });
+        if (existingUser) {
+            return res.status(400).json({ success: false, message: 'User already exists' });
         }
         
-        if (newPassword !== confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'Passwords do not match'
-            });
-        }
+        const defaultPassword = generateDefaultPassword();
         
-        if (newPassword.length < 6) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must be at least 6 characters long'
-            });
-        }
+        const user = new User({
+            name, 
+            fatherName, 
+            dateOfBirth: new Date(dateOfBirth), 
+            aadharNumber,
+            presentAddress, 
+            permanentAddress, 
+            dateOfJoin: new Date(dateOfJoin),
+            packageDetails, 
+            packageValue, 
+            packagePrice, 
+            packageDuration,
+            contactNumber, 
+            altContactNumber, 
+            email: email.toLowerCase(),
+            password: defaultPassword, 
+            isPasswordChanged: false, 
+            status: 'pending',
+            // Payment fields
+            paymentMethod: paymentMethod || null,
+            paymentAmount: paidAmount,
+            transactionId: transactionId || null,
+            paymentStatus: paymentStatus || (paidAmount >= packagePriceNum ? 'completed' : 'pending'),
+            paymentDate: paidAmount > 0 ? new Date() : null
+        });
         
-        const user = await User.findById(decoded.id).select('+password');
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
-        }
-        
-        user.password = newPassword;
-        user.isPasswordChanged = true;
-        user.lastPasswordChange = new Date();
         await user.save();
         
-        await sendPasswordChangeConfirmationEmail(user.email, user.name, 'student');
+        // Create progress record
+        const initialProgress = new StudentProgress({
+            studentId: user._id, 
+            registrationId: user.registrationId,
+            courseProgress: { 
+                totalModules: 12, 
+                completedModules: 0, 
+                currentModule: "Introduction to Beauty & Cosmetology", 
+                nextModule: "Skin Care Fundamentals", 
+                assignments: 3, 
+                completedAssignments: 0, 
+                moduleProgress: [] 
+            },
+            recentActivities: [{ 
+                activity: `Registered for ${packageDetails} course with ${paidAmount >= packagePriceNum ? 'full' : 'partial'} payment`, 
+                type: 'achievement' 
+            }]
+        });
+        await initialProgress.save();
         
-        res.status(200).json({
-            success: true,
-            message: 'Password changed successfully! Please login with your new password.'
+        // If payment is completed, also create a payment record
+        if (paidAmount >= packagePriceNum && paymentMethod) {
+            const payment = new Payment({
+                studentId: user._id,
+                studentName: name,
+                registrationId: user.registrationId,
+                amount: paidAmount,
+                paymentDate: new Date(),
+                status: 'completed',
+                paymentMethod: paymentMethod === 'UPI' ? 'UPI' : 'Cash',
+                transactionId: transactionId || `REG-${user.registrationId}`,
+                remarks: `Registration payment for ${packageDetails}`
+            });
+            await payment.save();
+        }
+        
+        // Send welcome email
+        await sendStudentWelcomeEmail({ 
+            name, 
+            email, 
+            registrationId: user.registrationId, 
+            packageDetails, 
+            dateOfJoin 
+        }, defaultPassword);
+        
+        // Send notifications to admins
+        const admins = await Admin.find({ 
+            role: { $in: ['super_admin', 'hr_manager', 'admin'] }, 
+            isActive: true 
         });
         
+        for (const admin of admins) {
+            await sendAdminEmailNotification(admin.email, admin.name, user.name, user.email, user.registrationId);
+        }
+        
+        await sendNotificationToAdmins(
+            'New Student Registration', 
+            `${user.name} (${user.registrationId}) has registered with ${paidAmount >= packagePriceNum ? 'full' : 'partial'} payment.`, 
+            'registration', 
+            user._id
+        );
+        
+        const userResponse = user.toObject();
+        delete userResponse.password;
+        
+        res.status(201).json({ 
+            success: true, 
+            message: 'Registration successful! Login credentials sent to your email.', 
+            data: userResponse 
+        });
     } catch (error) {
-        console.error('Student first-time password change error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to change password',
-            error: error.message
+        console.error('Registration error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error during registration', 
+            error: error.message 
         });
     }
 });
 
-// ==================== ADMIN PASSWORD CHANGE ====================
-
-app.post('/api/admin/first-time-password', async (req, res) => {
-    try {
-        const token = req.headers.authorization?.split(' ')[1];
-        
-        if (!token) {
-            return res.status(401).json({
-                success: false,
-                message: 'No token provided. Please login again.'
-            });
-        }
-        
-        let decoded;
-        try {
-            decoded = jwt.verify(token, JWT_SECRET);
-            if (decoded.type !== 'admin') {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access denied. Admin only endpoint.'
-                });
-            }
-        } catch (err) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid or expired token'
-            });
-        }
-        
-        const { newPassword, confirmPassword } = req.body;
-        
-        if (!newPassword || !confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'New password and confirm password are required'
-            });
-        }
-        
-        if (newPassword !== confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'Passwords do not match'
-            });
-        }
-        
-        if (newPassword.length < 8) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must be at least 8 characters long'
-            });
-        }
-        
-        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-        if (!passwordRegex.test(newPassword)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Password must contain uppercase, lowercase, number, and special character'
-            });
-        }
-        
-        const admin = await Admin.findById(decoded.id).select('+password');
-        
-        if (!admin) {
-            return res.status(404).json({
-                success: false,
-                message: 'Admin not found'
-            });
-        }
-        
-        admin.password = newPassword;
-        admin.isPasswordChanged = true;
-        admin.lastPasswordChange = new Date();
-        await admin.save();
-        
-        await sendPasswordChangeConfirmationEmail(admin.email, admin.name, 'staff');
-        
-        res.status(200).json({
-            success: true,
-            message: 'Password changed successfully! Please login with your new password.'
-        });
-        
-    } catch (error) {
-        console.error('Admin first-time password change error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to change password',
-            error: error.message
-        });
-    }
-});
-
-// ==================== STUDENT LOGIN API ====================
-
+// Student Login
 app.post('/api/user/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        
-        if (!email || !password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide email and password'
-            });
-        }
-        
         const user = await User.findOne({ email }).select('+password');
-        
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid credentials'
-            });
-        }
+        if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
         
         const isPasswordValid = await user.comparePassword(password);
+        if (!isPasswordValid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
         
-        if (!isPasswordValid) {
-            user.loginAttempts = (user.loginAttempts || 0) + 1;
-            if (user.loginAttempts >= 5) {
-                user.lockUntil = Date.now() + 30 * 60 * 1000;
-                await user.save();
-                return res.status(401).json({
-                    success: false,
-                    message: 'Account locked due to multiple failed attempts'
-                });
-            }
-            await user.save();
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid credentials'
-            });
-        }
-        
-        user.loginAttempts = 0;
-        user.lockUntil = undefined;
-        await user.save();
-        
-        const token = jwt.sign(
-            { id: user._id, email: user.email, role: 'student', registrationId: user.registrationId },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-        
+        const token = jwt.sign({ id: user._id, email: user.email, role: 'student', registrationId: user.registrationId }, JWT_SECRET, { expiresIn: '7d' });
         const userData = user.toObject();
         delete userData.password;
         
-        res.status(200).json({
-            success: true,
-            message: 'Login successful',
-            data: { 
-                user: userData, 
-                token,
-                requiresPasswordChange: !user.isPasswordChanged
-            }
-        });
-        
+        res.status(200).json({ success: true, message: 'Login successful', data: { user: userData, token, requiresPasswordChange: !user.isPasswordChanged } });
     } catch (error) {
-        console.error('User login error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error logging in',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Error logging in', error: error.message });
     }
 });
 
-// ==================== ADMIN LOGIN API ====================
-
+// Admin Login
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        
-        if (!email || !password) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide email and password'
-            });
-        }
-        
         const admin = await Admin.findOne({ email }).select('+password');
-        
-        if (!admin) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid credentials'
-            });
-        }
-        
-        if (!admin.isActive) {
-            return res.status(401).json({
-                success: false,
-                message: 'Account is deactivated'
-            });
-        }
+        if (!admin) return res.status(401).json({ success: false, message: 'Invalid credentials' });
         
         const isPasswordValid = await admin.comparePassword(password);
+        if (!isPasswordValid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
         
-        if (!isPasswordValid) {
-            admin.loginAttempts = (admin.loginAttempts || 0) + 1;
-            if (admin.loginAttempts >= 5) {
-                admin.lockUntil = Date.now() + 30 * 60 * 1000;
-                await admin.save();
-                return res.status(401).json({
-                    success: false,
-                    message: 'Account locked due to multiple failed attempts'
-                });
-            }
-            await admin.save();
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid credentials'
-            });
-        }
-        
-        admin.loginAttempts = 0;
-        admin.lockUntil = undefined;
-        admin.lastLogin = new Date();
-        await admin.save();
-        
-        const token = jwt.sign(
-            { id: admin._id, email: admin.email, role: admin.role, type: 'admin' },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-        
+        const token = jwt.sign({ id: admin._id, email: admin.email, role: admin.role, type: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
         const adminData = admin.toObject();
         delete adminData.password;
         
-        res.status(200).json({
-            success: true,
-            message: 'Login successful',
-            data: { 
-                admin: adminData, 
-                token,
-                requiresPasswordChange: !admin.isPasswordChanged
-            }
-        });
-        
+        res.status(200).json({ success: true, message: 'Login successful', data: { admin: adminData, token, requiresPasswordChange: !admin.isPasswordChanged } });
     } catch (error) {
-        console.error('Admin login error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error logging in',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Error logging in', error: error.message });
     }
 });
 
-// ==================== PROFILE API ====================
-
+// Student Profile
 app.get('/api/student/profile', verifyStudentToken, async (req, res) => {
     try {
         const user = req.user;
-        
-        const profileData = {
-            registrationId: user.registrationId,
-            name: user.name,
-            fatherName: user.fatherName,
-            dateOfBirth: user.dateOfBirth,
-            aadharNumber: user.aadharNumber,
-            presentAddress: user.presentAddress,
-            permanentAddress: user.permanentAddress,
-            dateOfJoin: user.dateOfJoin,
-            packageDetails: user.packageDetails,
-            packageValue: user.packageValue,
-            packagePrice: user.packagePrice,
-            packageDuration: user.packageDuration,
-            contactNumber: user.contactNumber,
-            altContactNumber: user.altContactNumber,
-            email: user.email,
-            status: user.status,
-            isPasswordChanged: user.isPasswordChanged,
-            createdAt: user.createdAt,
-            lastPasswordChange: user.lastPasswordChange
-        };
-        
-        res.status(200).json({
-            success: true,
-            message: 'Profile data fetched successfully',
-            data: profileData
-        });
-        
+        res.status(200).json({ success: true, data: user });
     } catch (error) {
-        console.error('Profile fetch error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching profile data',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Error fetching profile', error: error.message });
     }
 });
 
-// ==================== DASHBOARD STATS API ====================
-
+// Dashboard Stats
 app.get('/api/student/dashboard-stats', verifyStudentToken, async (req, res) => {
     try {
-        const user = req.user;
-        
-        let progress = await StudentProgress.findOne({ studentId: user._id });
-        
+        let progress = await StudentProgress.findOne({ studentId: req.user._id });
         if (!progress) {
-            progress = new StudentProgress({
-                studentId: user._id,
-                registrationId: user.registrationId,
-                courseProgress: {
-                    completed: 0,
-                    totalModules: 12,
-                    completedModules: 0,
-                    currentModule: "Introduction to Beauty & Cosmetology",
-                    nextModule: "Skin Care Fundamentals",
-                    assignments: 3,
-                    completedAssignments: 0,
-                    moduleProgress: []
-                },
-                achievementPoints: 0,
-                certificateStatus: "Not Started",
-                recentActivities: [
-                    {
-                        activity: `Started ${user.packageDetails} course`,
-                        date: new Date(),
-                        type: 'achievement'
-                    }
-                ]
-            });
+            progress = new StudentProgress({ studentId: req.user._id, registrationId: req.user.registrationId });
             await progress.save();
         }
-        
-        const assignments = await Assignment.find({ studentId: user._id }).sort({ dueDate: -1 });
-        const totalAssignments = assignments.length;
-        const completedAssignments = assignments.filter(a => a.status === 'submitted' || a.status === 'graded').length;
-        
-        progress.courseProgress.assignments = totalAssignments || 3;
-        progress.courseProgress.completedAssignments = completedAssignments;
-        
-        const totalModulesCount = progress.courseProgress.totalModules;
-        const completedModulesCount = progress.courseProgress.completedModules;
-        const progressPercentage = totalModulesCount > 0 
-            ? Math.round((completedModulesCount / totalModulesCount) * 100) 
-            : 0;
-        
-        progress.courseProgress.completed = progressPercentage;
-        
-        if (progressPercentage === 100) {
-            progress.certificateStatus = 'Eligible';
-        } else if (progressPercentage > 0) {
-            progress.certificateStatus = 'In Progress';
-        }
-        
-        await progress.save();
-        
-        const recentActivities = progress.recentActivities
-            .sort((a, b) => new Date(b.date) - new Date(a.date))
-            .slice(0, 5);
         
         const stats = {
             courseProgress: progress.courseProgress,
             achievementPoints: progress.achievementPoints,
             certificateStatus: progress.certificateStatus,
-            recentActivities: recentActivities.map(activity => ({
-                activity: activity.activity,
-                date: new Date(activity.date).toISOString().split('T')[0],
-                type: activity.type
-            }))
+            recentActivities: progress.recentActivities.slice(0, 5)
         };
         
-        res.status(200).json({
-            success: true,
-            message: 'Dashboard statistics fetched successfully',
-            data: stats
-        });
-        
+        res.status(200).json({ success: true, data: stats });
     } catch (error) {
-        console.error('Dashboard stats error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching dashboard statistics',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Error fetching stats', error: error.message });
     }
 });
 
-// ==================== OTHER API ENDPOINTS ====================
-
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
-        message: 'Server is running', 
-        timestamp: new Date()
-    });
+// Admin - Get All Students
+app.get('/api/admin/all-students', verifyAdminToken, async (req, res) => {
+    try {
+        const students = await User.find().select('-password').sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: students });
+    } catch (error) {
+        console.error('Error fetching all students:', error);
+        res.status(500).json({ success: false, message: 'Error fetching students', error: error.message });
+    }
 });
 
+// Admin - Get Pending Students
+app.get('/api/admin/pending-students', verifyAdminToken, async (req, res) => {
+    try {
+        const students = await User.find({ status: 'pending' }).select('-password').sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: students });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error fetching students', error: error.message });
+    }
+});
+
+// Admin - Get Approved Students
+app.get('/api/admin/approved-students', verifyAdminToken, async (req, res) => {
+    try {
+        const students = await User.find({ status: 'active' }).select('-password').sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: students });
+    } catch (error) {
+        console.error('Error fetching approved students:', error);
+        res.status(500).json({ success: false, message: 'Error fetching approved students', error: error.message });
+    }
+});
+
+// Admin - Get Rejected Students
+app.get('/api/admin/rejected-students', verifyAdminToken, async (req, res) => {
+    try {
+        const students = await User.find({ status: 'rejected' }).select('-password').sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: students });
+    } catch (error) {
+        console.error('Error fetching rejected students:', error);
+        res.status(500).json({ success: false, message: 'Error fetching rejected students', error: error.message });
+    }
+});
+
+// Admin - Get Student Stats
+app.get('/api/admin/student-stats', verifyAdminToken, async (req, res) => {
+    try {
+        const stats = {
+            total: await User.countDocuments(),
+            pending: await User.countDocuments({ status: 'pending' }),
+            approved: await User.countDocuments({ status: 'active' }),
+            rejected: await User.countDocuments({ status: 'rejected' })
+        };
+        res.status(200).json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error fetching stats', error: error.message });
+    }
+});
+
+// Admin - Approve Single Student
+app.put('/api/admin/approve-student/:studentId', verifyAdminToken, async (req, res) => {
+    try {
+        const student = await User.findById(req.params.studentId);
+        if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+        
+        student.status = 'active';
+        await student.save();
+        
+        await sendStudentApprovalEmail(student.email, student.name, student.registrationId, 'approved');
+        
+        res.status(200).json({ success: true, message: 'Student approved successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error approving student', error: error.message });
+    }
+});
+
+// Admin - Bulk Approve Students
+app.post('/api/admin/bulk-approve-students', verifyAdminToken, async (req, res) => {
+    try {
+        const { studentIds } = req.body;
+        if (!studentIds || studentIds.length === 0) {
+            return res.status(400).json({ success: false, message: 'No students selected' });
+        }
+        
+        const students = await User.find({ _id: { $in: studentIds }, status: 'pending' });
+        for (const student of students) {
+            student.status = 'active';
+            await student.save();
+            await sendStudentApprovalEmail(student.email, student.name, student.registrationId, 'approved');
+        }
+        
+        res.status(200).json({ success: true, message: `${students.length} students approved successfully` });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error bulk approving students', error: error.message });
+    }
+});
+
+// Admin - Reject Single Student
+app.put('/api/admin/reject-student/:studentId', verifyAdminToken, async (req, res) => {
+    try {
+        const { remarks } = req.body;
+        if (!remarks) return res.status(400).json({ success: false, message: 'Remarks are required' });
+        
+        const student = await User.findById(req.params.studentId);
+        if (!student) return res.status(404).json({ success: false, message: 'Student not found' });
+        
+        student.status = 'rejected';
+        await student.save();
+        
+        await sendStudentApprovalEmail(student.email, student.name, student.registrationId, 'rejected', remarks);
+        
+        res.status(200).json({ success: true, message: 'Student rejected successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error rejecting student', error: error.message });
+    }
+});
+
+// Admin - Bulk Reject Students
+app.post('/api/admin/bulk-reject-students', verifyAdminToken, async (req, res) => {
+    try {
+        const { studentIds, remarks } = req.body;
+        if (!studentIds || studentIds.length === 0) return res.status(400).json({ success: false, message: 'No students selected' });
+        if (!remarks) return res.status(400).json({ success: false, message: 'Remarks are required' });
+        
+        const students = await User.find({ _id: { $in: studentIds }, status: 'pending' });
+        for (const student of students) {
+            student.status = 'rejected';
+            await student.save();
+            await sendStudentApprovalEmail(student.email, student.name, student.registrationId, 'rejected', remarks);
+        }
+        
+        res.status(200).json({ success: true, message: `${students.length} students rejected successfully` });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error bulk rejecting students', error: error.message });
+    }
+});
+
+// Admin - Update Student
+app.put('/api/admin/students/:studentId', verifyAdminToken, async (req, res) => {
+    try {
+        const { name, email, contactNumber, presentAddress, packageDetails, packagePrice, status } = req.body;
+        
+        const student = await User.findById(req.params.studentId);
+        if (!student) {
+            return res.status(404).json({ success: false, message: 'Student not found' });
+        }
+        
+        if (email && email !== student.email) {
+            const existingUser = await User.findOne({ email, _id: { $ne: req.params.studentId } });
+            if (existingUser) {
+                return res.status(400).json({ success: false, message: 'Email already exists' });
+            }
+        }
+        
+        if (name) student.name = name;
+        if (email) student.email = email;
+        if (contactNumber) student.contactNumber = contactNumber;
+        if (presentAddress) student.presentAddress = presentAddress;
+        if (packageDetails) student.packageDetails = packageDetails;
+        if (packagePrice) student.packagePrice = packagePrice;
+        if (status) student.status = status;
+        
+        await student.save();
+        
+        const updatedStudent = student.toObject();
+        delete updatedStudent.password;
+        
+        res.status(200).json({ success: true, message: 'Student updated successfully', data: updatedStudent });
+    } catch (error) {
+        console.error('Error updating student:', error);
+        res.status(500).json({ success: false, message: 'Error updating student', error: error.message });
+    }
+});
+
+// Admin - Delete Student
+app.delete('/api/admin/students/:studentId', verifyAdminToken, async (req, res) => {
+    try {
+        const student = await User.findById(req.params.studentId);
+        if (!student) {
+            return res.status(404).json({ success: false, message: 'Student not found' });
+        }
+        
+        await StudentProgress.deleteOne({ studentId: req.params.studentId });
+        await Assignment.deleteMany({ studentId: req.params.studentId });
+        await ModuleCompletion.deleteMany({ studentId: req.params.studentId });
+        await ApprovalHistory.deleteMany({ studentId: req.params.studentId });
+        
+        await User.findByIdAndDelete(req.params.studentId);
+        
+        res.status(200).json({ success: true, message: 'Student deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting student:', error);
+        res.status(500).json({ success: false, message: 'Error deleting student', error: error.message });
+    }
+});
+
+// Admin - Get Notifications
+app.get('/api/admin/notifications', verifyAdminToken, async (req, res) => {
+    try {
+        const notifications = await Notification.find({ recipientId: req.admin._id }).sort({ createdAt: -1 }).limit(50);
+        const unreadCount = await Notification.countDocuments({ recipientId: req.admin._id, isRead: false });
+        res.status(200).json({ success: true, data: { notifications, unreadCount } });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error fetching notifications', error: error.message });
+    }
+});
+
+// Admin - Mark Notification as Read
+app.put('/api/admin/notifications/:notificationId/read', verifyAdminToken, async (req, res) => {
+    try {
+        await Notification.findByIdAndUpdate(req.params.notificationId, { isRead: true });
+        res.status(200).json({ success: true, message: 'Notification marked as read' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error updating notification', error: error.message });
+    }
+});
+
+// Admin - Get All Admins
 app.get('/api/admins', async (req, res) => {
     try {
-        const admins = await Admin.find().select('-password -loginAttempts -lockUntil').sort({ createdAt: -1 });
-        res.status(200).json({
-            success: true,
-            count: admins.length,
-            data: admins
-        });
+        const admins = await Admin.find().select('-password').sort({ createdAt: -1 });
+        res.status(200).json({ success: true, data: admins });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching users',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Error fetching admins', error: error.message });
     }
 });
 
-app.get('/api/users', async (req, res) => {
+// Admin - Create Admin
+app.post('/api/admins', async (req, res) => {
     try {
-        const users = await User.find().select('-password').sort({ createdAt: -1 });
-        res.status(200).json({
-            success: true,
-            count: users.length,
-            data: users
+        const { name, email, role } = req.body;
+        const defaultPassword = generateDefaultPassword();
+        
+        const admin = new Admin({ name, email, password: defaultPassword, role: role || 'admin', isActive: true, isPasswordChanged: false });
+        await admin.save();
+        
+        res.status(201).json({ success: true, message: 'Admin created successfully', data: { name, email, role: admin.role, defaultPassword } });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error creating admin', error: error.message });
+    }
+});
+
+// Admin - Update Admin
+app.put('/api/admins/:id', async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'No token provided' });
+        }
+
+        try {
+            jwt.verify(token, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+        }
+
+        const { id } = req.params;
+        const { name, email, role, phone, department, salary, status } = req.body;
+
+        const admin = await Admin.findById(id);
+        if (!admin) {
+            return res.status(404).json({ success: false, message: 'Employee not found' });
+        }
+
+        if (email && email !== admin.email) {
+            const existingAdmin = await Admin.findOne({ email, _id: { $ne: id } });
+            if (existingAdmin) {
+                return res.status(400).json({ success: false, message: 'Email already exists' });
+            }
+        }
+
+        if (name) admin.name = name;
+        if (email) admin.email = email;
+        if (role) admin.role = role;
+        if (phone) admin.phone = phone;
+        if (department) admin.department = department;
+        if (salary) admin.salary = salary;
+        if (status !== undefined) admin.isActive = status === 'Active';
+
+        await admin.save();
+
+        const updatedAdmin = admin.toObject();
+        delete updatedAdmin.password;
+
+        res.status(200).json({ success: true, message: 'Employee updated successfully', data: updatedAdmin });
+    } catch (error) {
+        console.error('Update admin error:', error);
+        res.status(500).json({ success: false, message: 'Error updating employee', error: error.message });
+    }
+});
+
+// Admin - Delete Admin
+app.delete('/api/admins/:id', async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) {
+            return res.status(401).json({ success: false, message: 'No token provided' });
+        }
+
+        try {
+            jwt.verify(token, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+        }
+
+        const { id } = req.params;
+
+        const admin = await Admin.findById(id);
+        if (!admin) {
+            return res.status(404).json({ success: false, message: 'Employee not found' });
+        }
+
+        if (admin.role === 'super_admin') {
+            const superAdminCount = await Admin.countDocuments({ role: 'super_admin' });
+            if (superAdminCount === 1) {
+                return res.status(400).json({ success: false, message: 'Cannot delete the only Super Admin user' });
+            }
+        }
+
+        await Admin.findByIdAndDelete(id);
+
+        res.status(200).json({ success: true, message: 'Employee deleted successfully' });
+    } catch (error) {
+        console.error('Delete admin error:', error);
+        res.status(500).json({ success: false, message: 'Error deleting employee', error: error.message });
+    }
+});
+
+// ==================== PAYMENT ENDPOINTS ====================
+
+// Get all payments
+app.get('/api/admin/payments', verifyAdminToken, async (req, res) => {
+    try {
+        const { status, startDate, endDate } = req.query;
+        let query = {};
+        
+        if (status && status !== 'all') {
+            query.status = status;
+        }
+        
+        if (startDate || endDate) {
+            query.paymentDate = {};
+            if (startDate) query.paymentDate.$gte = new Date(startDate);
+            if (endDate) query.paymentDate.$lte = new Date(endDate);
+        }
+        
+        const payments = await Payment.find(query).sort({ paymentDate: -1, createdAt: -1 });
+        res.status(200).json({ success: true, data: payments });
+    } catch (error) {
+        console.error('Error fetching payments:', error);
+        res.status(500).json({ success: false, message: 'Error fetching payments', error: error.message });
+    }
+});
+
+// Create new payment
+app.post('/api/admin/payments', verifyAdminToken, async (req, res) => {
+    try {
+        const { studentId, studentName, amount, paymentDate, status, paymentMethod, transactionId, remarks } = req.body;
+        
+        const student = await User.findById(studentId);
+        if (!student) {
+            return res.status(404).json({ success: false, message: 'Student not found' });
+        }
+        
+        let finalTransactionId = transactionId;
+        if (!finalTransactionId) {
+            const prefix = 'TXN';
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const count = await Payment.countDocuments();
+            finalTransactionId = `${prefix}${year}${month}${String(count + 1).padStart(6, '0')}`;
+        }
+        
+        const payment = new Payment({
+            studentId,
+            studentName,
+            registrationId: student.registrationId,
+            amount,
+            paymentDate: paymentDate || new Date(),
+            status,
+            paymentMethod,
+            transactionId: finalTransactionId,
+            remarks
+        });
+        
+        await payment.save();
+        
+        if (status === 'completed') {
+            student.paymentStatus = 'completed';
+            student.paymentDate = paymentDate;
+            student.paymentMethod = paymentMethod;
+            student.transactionId = finalTransactionId;
+            await student.save();
+        }
+        
+        res.status(201).json({ success: true, message: 'Payment created successfully', data: payment });
+    } catch (error) {
+        console.error('Error creating payment:', error);
+        if (error.code === 11000) {
+            return res.status(400).json({ success: false, message: 'Transaction ID already exists' });
+        }
+        res.status(500).json({ success: false, message: 'Error creating payment', error: error.message });
+    }
+});
+
+// Update payment
+app.put('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
+    try {
+        const { amount, paymentDate, status, paymentMethod, transactionId, remarks } = req.body;
+        
+        const payment = await Payment.findById(req.params.paymentId);
+        if (!payment) {
+            return res.status(404).json({ success: false, message: 'Payment not found' });
+        }
+        
+        if (amount) payment.amount = amount;
+        if (paymentDate) payment.paymentDate = paymentDate;
+        if (status) payment.status = status;
+        if (paymentMethod) payment.paymentMethod = paymentMethod;
+        if (transactionId) payment.transactionId = transactionId;
+        if (remarks !== undefined) payment.remarks = remarks;
+        payment.updatedAt = new Date();
+        
+        await payment.save();
+        
+        if (status === 'completed') {
+            const student = await User.findById(payment.studentId);
+            if (student) {
+                student.paymentStatus = 'completed';
+                student.paymentDate = paymentDate || payment.paymentDate;
+                student.paymentMethod = paymentMethod || payment.paymentMethod;
+                student.transactionId = transactionId || payment.transactionId;
+                await student.save();
+            }
+        }
+        
+        res.status(200).json({ success: true, message: 'Payment updated successfully', data: payment });
+    } catch (error) {
+        console.error('Error updating payment:', error);
+        res.status(500).json({ success: false, message: 'Error updating payment', error: error.message });
+    }
+});
+
+// Delete payment
+app.delete('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
+    try {
+        const payment = await Payment.findById(req.params.paymentId);
+        if (!payment) {
+            return res.status(404).json({ success: false, message: 'Payment not found' });
+        }
+        
+        await Payment.findByIdAndDelete(req.params.paymentId);
+        res.status(200).json({ success: true, message: 'Payment deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting payment:', error);
+        res.status(500).json({ success: false, message: 'Error deleting payment', error: error.message });
+    }
+});
+
+// Get payment statistics
+app.get('/api/admin/payments/stats', verifyAdminToken, async (req, res) => {
+    try {
+        const payments = await Payment.find();
+        
+        const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
+        const completedAmount = payments.filter(p => p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
+        const pendingAmount = payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0);
+        const successRate = totalRevenue > 0 ? Math.round((completedAmount / totalRevenue) * 100) : 0;
+        
+        res.status(200).json({ 
+            success: true, 
+            data: {
+                totalRevenue,
+                completedAmount,
+                pendingAmount,
+                successRate,
+                totalPayments: payments.length,
+                completedCount: payments.filter(p => p.status === 'completed').length,
+                pendingCount: payments.filter(p => p.status === 'pending').length,
+                failedCount: payments.filter(p => p.status === 'failed').length
+            }
         });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Error fetching users',
-            error: error.message
-        });
+        console.error('Error fetching payment stats:', error);
+        res.status(500).json({ success: false, message: 'Error fetching statistics', error: error.message });
     }
+});
+
+// Health Check
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'OK', message: 'Server is running', timestamp: new Date() });
 });
 
 // ==================== START SERVER ====================
@@ -1324,18 +1275,20 @@ app.get('/api/users', async (req, res) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`\n🚀 Server running on http://localhost:${PORT}`);
-    console.log(`\n📧 Email Configuration: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not Configured'}`);
+    console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not Configured'}`);
     console.log(`\n📡 API Endpoints:`);
-    console.log(`\n👤 Student APIs:`);
-    console.log(`   POST   /api/register - Register new student`);
-    console.log(`   POST   /api/user/login - Student login`);
-    console.log(`   GET    /api/student/profile - Get student profile`);
-    console.log(`   GET    /api/student/dashboard-stats - Get dashboard stats`);
-    console.log(`   POST   /api/student/first-time-password - Student first-time password change`);
-    console.log(`\n👨‍💼 Admin APIs:`);
-    console.log(`   POST   /api/admins - Create admin/employee`);
-    console.log(`   POST   /api/login - Admin login`);
-    console.log(`   POST   /api/admin/first-time-password - Admin first-time password change`);
-    console.log(`   GET    /api/admins - Get all admins`);
-    console.log(`   GET    /api/users - Get all students\n`);
+    console.log(`   POST   /api/register - Student Registration`);
+    console.log(`   POST   /api/user/login - Student Login`);
+    console.log(`   POST   /api/login - Admin Login`);
+    console.log(`   GET    /api/student/profile - Student Profile`);
+    console.log(`   GET    /api/student/dashboard-stats - Dashboard Stats`);
+    console.log(`   GET    /api/admin/all-students - All Students (Admin)`);
+    console.log(`   GET    /api/admin/pending-students - Pending Students (Admin)`);
+    console.log(`   GET    /api/admin/approved-students - Approved Students (Admin)`);
+    console.log(`   GET    /api/admin/rejected-students - Rejected Students (Admin)`);
+    console.log(`   PUT    /api/admin/approve-student/:id - Approve Student (Admin)`);
+    console.log(`   POST   /api/admin/bulk-approve-students - Bulk Approve (Admin)`);
+    console.log(`   GET    /api/admin/payments - Payments (Admin)`);
+    console.log(`   POST   /api/admin/payments - Create Payment (Admin)`);
+    console.log(`   GET    /api/admin/notifications - Notifications (Admin)\n`);
 });
