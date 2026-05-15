@@ -38,10 +38,8 @@ const transporter = nodemailer.createTransport({
 
 // ==================== SCHEMAS ====================
 
-// User Schema (UPDATED with Payment Fields)
-// User Schema (FIXED - Allows null for payment fields)
+// User Schema
 const userSchema = new mongoose.Schema({
-    // Personal Information
     registrationId: { type: String, unique: true },
     name: { type: String, required: true, trim: true },
     fatherName: { type: String, required: true, trim: true },
@@ -49,25 +47,18 @@ const userSchema = new mongoose.Schema({
     aadharNumber: { type: String, required: true, unique: true },
     presentAddress: { type: String, required: true, trim: true },
     permanentAddress: { type: String, required: true, trim: true },
-    
-    // Course Information
     dateOfJoin: { type: Date, required: true },
     packageDetails: { type: String, required: true },
     packageValue: { type: String },
     packagePrice: { type: String },
+    dueAmount: { type: Number, default: 0 },
     packageDuration: { type: String },
-    
-    // Contact Information
     contactNumber: { type: String, required: true },
     altContactNumber: { type: String },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    
-    // Account Information
     password: { type: String, required: true, select: false },
     isPasswordChanged: { type: Boolean, default: false },
     lastPasswordChange: { type: Date },
-    
-    // Payment Fields - Allow null/undefined for new registrations
     paymentStatus: { 
         type: String, 
         enum: ['completed', 'pending', 'failed'], 
@@ -76,6 +67,7 @@ const userSchema = new mongoose.Schema({
     paymentDate: { type: Date, default: null },
     paymentMethod: { 
         type: String,
+        set: v => v ? (v.toUpperCase() === 'UPI' ? 'UPI' : v.charAt(0).toUpperCase() + v.slice(1).toLowerCase()) : v,
         enum: ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'],
         default: null
     },
@@ -87,33 +79,16 @@ const userSchema = new mongoose.Schema({
         default: null
     },
     paymentAmount: { type: Number, default: 0 },
-    
-    // Status Information
     status: { 
         type: String, 
         enum: ['pending', 'approved', 'rejected', 'active'], 
         default: 'pending' 
     },
-    
-    // Security Information
     loginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date },
-    
-    // Timestamps
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
-}, { 
-    timestamps: true 
-});
-
-// Add this validation to handle null values properly
-userSchema.path('paymentMethod').validate(function(value) {
-    // Allow null or undefined for new registrations
-    if (value === null || value === undefined) return true;
-    // Valid enum values
-    const validMethods = ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'];
-    return validMethods.includes(value);
-}, 'Invalid payment method');
+}, { timestamps: true });
 
 // Student Progress Schema
 const studentProgressSchema = new mongoose.Schema({
@@ -194,7 +169,7 @@ const notificationSchema = new mongoose.Schema({
     recipientRole: { type: String, enum: ['super_admin', 'hr_manager', 'admin'], required: true },
     title: { type: String, required: true },
     message: { type: String, required: true },
-    type: { type: String, enum: ['registration', 'approval', 'rejection', 'system'], default: 'registration' },
+    type: { type: String, enum: ['registration', 'approval', 'rejection', 'system', 'password_change'], default: 'registration' },
     relatedId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     isRead: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now }
@@ -215,23 +190,91 @@ const approvalHistorySchema = new mongoose.Schema({
 });
 
 // Payment Schema
+// Updated Payment Schema with dueAmount field
 const paymentSchema = new mongoose.Schema({
     studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     studentName: { type: String, required: true },
     registrationId: { type: String, required: true },
     amount: { type: Number, required: true, min: 0 },
+    dueAmount: { type: Number, default: 0, min: 0 },  // ✅ New field
     paymentDate: { type: Date, default: Date.now },
-    status: { type: String, enum: ['completed', 'pending', 'failed'], default: 'pending' },
-    paymentMethod: { type: String, enum: ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'], required: true },
+    status: { 
+        type: String, 
+        enum: ['completed', 'pending', 'failed', 'partial'], 
+        default: 'pending' 
+    },
+    paymentMethod: { 
+        type: String, 
+        enum: ['Credit Card', 'Bank Transfer', 'PayPal', 'Cash', 'UPI'], 
+        required: true 
+    },
     transactionId: { type: String, unique: true, sparse: true },
     remarks: { type: String },
+    coursePackage: { type: String },  // ✅ New field
+    packagePrice: { type: Number, default: 0 },  // ✅ New field
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
+// Add index for better query performance
+paymentSchema.index({ studentId: 1 });
+paymentSchema.index({ registrationId: 1 });
+paymentSchema.index({ status: 1 });
+paymentSchema.index({ paymentDate: -1 });
+
+// Virtual for formatted amount
+paymentSchema.virtual('formattedAmount').get(function() {
+    return `₹${this.amount.toLocaleString()}`;
+});
+
+// Virtual for formatted due amount
+paymentSchema.virtual('formattedDueAmount').get(function() {
+    return `₹${this.dueAmount.toLocaleString()}`;
+});
+
+// Method to update payment status based on amount and due amount
+paymentSchema.methods.updatePaymentStatus = function() {
+    if (this.dueAmount <= 0) {
+        this.status = 'completed';
+    } else if (this.amount > 0 && this.dueAmount > 0) {
+        this.status = 'partial';
+    } else if (this.amount === 0) {
+        this.status = 'pending';
+    }
+    return this.status;
+};
+
+
+// Add index for better query performance
+paymentSchema.index({ studentId: 1 });
+paymentSchema.index({ registrationId: 1 });
+paymentSchema.index({ status: 1 });
+paymentSchema.index({ paymentDate: -1 });
+
+// Virtual for formatted amount
+paymentSchema.virtual('formattedAmount').get(function() {
+    return `₹${this.amount.toLocaleString()}`;
+});
+
+// Virtual for formatted due amount
+paymentSchema.virtual('formattedDueAmount').get(function() {
+    return `₹${this.dueAmount.toLocaleString()}`;
+});
+
+// Method to update payment status based on amount and due amount
+paymentSchema.methods.updatePaymentStatus = function() {
+    if (this.dueAmount <= 0) {
+        this.status = 'completed';
+    } else if (this.amount > 0 && this.dueAmount > 0) {
+        this.status = 'partial';
+    } else if (this.amount === 0) {
+        this.status = 'pending';
+    }
+    return this.status;
+};
+
 // ==================== PRE-SAVE HOOKS ====================
 
-// Generate registration ID for User
 userSchema.pre('save', async function(next) {
     if (this.isNew && !this.registrationId) {
         const prefix = 'IBA';
@@ -251,7 +294,6 @@ userSchema.pre('save', async function(next) {
     next();
 });
 
-// Hash password for User
 userSchema.pre('save', async function(next) {
     if (!this.isModified('password')) return next();
     try {
@@ -263,7 +305,6 @@ userSchema.pre('save', async function(next) {
     }
 });
 
-// Generate employee ID for Admin
 adminSchema.pre('save', async function(next) {
     if (this.isNew && !this.employeeId) {
         const prefix = 'IBA';
@@ -283,7 +324,6 @@ adminSchema.pre('save', async function(next) {
     next();
 });
 
-// Hash password for Admin
 adminSchema.pre('save', async function(next) {
     if (!this.isModified('password')) return next();
     try {
@@ -338,6 +378,390 @@ const generateDefaultPassword = () => {
     return password.split('').sort(() => 0.5 - Math.random()).join('');
 };
 
+
+
+// Send welcome email to student with registration details
+const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
+    try {
+        const { name, email, registrationId, packageDetails, packagePrice, paymentAmount, dueAmount, dateOfJoin } = userData;
+        
+        // Format dates safely
+        const formattedDateOfJoin = dateOfJoin ? new Date(dateOfJoin).toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        }) : 'Not specified';
+        
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Welcome to Intense Beauty Academy</title>
+                <style>
+                    * {
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        padding: 20px;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background: #ffffff;
+                        border-radius: 20px;
+                        overflow: hidden;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    }
+                    .header {
+    background: linear-gradient(135deg, #4b0082 0%, #8a2be2 100%);
+    color: white;
+    padding: 40px 30px;
+    text-align: center;
+}
+                    .header h1 {
+                        font-size: 28px;
+                        margin-bottom: 10px;
+                    }
+                    .header p {
+                        font-size: 16px;
+                        opacity: 0.95;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                        background: #ffffff;
+                    }
+                    .credentials {
+                        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                        border-left: 5px solid #ff6b6b;
+                    }
+                    .credentials h3 {
+                        color: #856404;
+                        margin-bottom: 15px;
+                    }
+                    .details {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                    }
+                    .details h3 {
+                        color: #ff6b6b;
+                        margin-bottom: 15px;
+                    }
+                    .info-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 10px 0;
+                        border-bottom: 1px solid #e0e0e0;
+                    }
+                    .info-label {
+                        font-weight: bold;
+                        color: #555;
+                    }
+                    .info-value {
+                        color: #333;
+                    }
+                    .payment-status {
+                        display: inline-block;
+                        padding: 5px 15px;
+                        border-radius: 20px;
+                        font-size: 14px;
+                        font-weight: bold;
+                    }
+                    .status-paid {
+                        background: #d4edda;
+                        color: #155724;
+                    }
+                    .status-partial {
+                        background: #fff3cd;
+                        color: #856404;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        margin-top: 25px;
+                        font-weight: bold;
+                        transition: transform 0.3s ease;
+                    }
+                    .button:hover {
+                        transform: translateY(-2px);
+                    }
+                    .warning-box {
+                        background: #fff3cd;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                        border-left: 5px solid #ffc107;
+                    }
+                    .warning-box h4 {
+                        color: #856404;
+                        margin-bottom: 10px;
+                    }
+                    .footer {
+                        background: #f8f9fa;
+                        padding: 20px 30px;
+                        text-align: center;
+                        font-size: 12px;
+                        color: #666;
+                        border-top: 1px solid #e0e0e0;
+                    }
+                    code {
+                        background: #f4f4f4;
+                        padding: 3px 8px;
+                        border-radius: 5px;
+                        font-family: monospace;
+                        font-size: 14px;
+                        color: #d63384;
+                    }
+                    @media (max-width: 480px) {
+                        .header h1 { font-size: 22px; }
+                        .content { padding: 25px 20px; }
+                        .info-row { flex-direction: column; }
+                        .info-value { margin-top: 5px; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>🎓 Welcome to Intense Beauty Academy!</h1>
+                        <p>Your Journey to Excellence Begins Here</p>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${name},</h2>
+                        <p>Thank you for choosing Intense Beauty Academy! We're thrilled to have you as part of our family. Your registration has been successfully completed.</p>
+                        
+                        <div class="credentials">
+                            <h3>📋 Your Login Credentials</h3>
+                            <div class="info-row">
+                                <span class="info-label">Registration ID:</span>
+                                <span class="info-value"><strong>${registrationId}</strong></span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Email:</span>
+                                <span class="info-value">${email}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Temporary Password:</span>
+                                <span class="info-value"><code>${defaultPassword}</code></span>
+                            </div>
+                            <p style="margin-top: 15px; color: #856404; font-size: 14px;">
+                                <strong>⚠️ Important:</strong> Please change your password immediately after first login for security reasons.
+                            </p>
+                        </div>
+                        
+                        <div class="details">
+                            <h3>📚 Course Enrollment Details</h3>
+                            <div class="info-row">
+                                <span class="info-label">Course Package:</span>
+                                <span class="info-value">${packageDetails || 'Not specified'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Date of Joining:</span>
+                                <span class="info-value">${formattedDateOfJoin}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Total Package Price:</span>
+                                <span class="info-value">${packagePrice || '₹0'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Amount Paid:</span>
+                                <span class="info-value">₹${(paymentAmount || 0).toLocaleString()}</span>
+                            </div>
+                            ${dueAmount > 0 ? `
+                            <div class="info-row">
+                                <span class="info-label">Due Amount:</span>
+                                <span class="info-value">₹${dueAmount.toLocaleString()}</span>
+                            </div>
+                            ` : ''}
+                            <div class="info-row">
+                                <span class="info-label">Payment Status:</span>
+                                <span class="info-value">
+                                    <span class="payment-status ${dueAmount === 0 ? 'status-paid' : 'status-partial'}">
+                                        ${dueAmount === 0 ? '✅ Fully Paid' : '⏳ Partially Paid'}
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">🚀 Login to Student Portal</a>
+                        </div>
+                        
+                        <div class="warning-box">
+                            <h4>📝 Next Steps:</h4>
+                            <ol style="margin-left: 20px;">
+                                <li>Login using your Registration ID/Email and temporary password</li>
+                                <li>Change your password immediately after first login</li>
+                                <li>Complete your profile and explore the course content</li>
+                                <li>Contact our support team for any assistance</li>
+                            </ol>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated email. Please do not reply to this message.</p>
+                        <p>For support, contact: support@intensebeautyacademy.com</p>
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        // Verify email configuration
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+            console.error('❌ Email credentials not configured in .env file');
+            return { success: false, error: 'Email credentials missing' };
+        }
+        
+        const mailOptions = {
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `🎓 Welcome to Intense Beauty Academy - Login Credentials (ID: ${registrationId})`,
+            html: emailHTML,
+            // Add text version as fallback
+            text: `Welcome to Intense Beauty Academy!\n\nRegistration ID: ${registrationId}\nEmail: ${email}\nTemporary Password: ${defaultPassword}\n\nPlease login at: http://localhost:5173/user/login`
+        };
+        
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Welcome email sent to:', email, 'Message ID:', info.messageId);
+        return { success: true, messageId: info.messageId };
+        
+    } catch (error) {
+        console.error('❌ Welcome email failed - Detailed error:', error.message);
+        console.error('Error code:', error.code);
+        console.error('Command:', error.command);
+        return { success: false, error: error.message };
+    }
+};
+
+
+// Send email for password change confirmation
+const sendPasswordChangeConfirmation = async (userData) => {
+    try {
+        const { name, email, registrationId } = userData;
+        
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Password Changed Successfully</title>
+                <style>
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        padding: 20px;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background: white;
+                        border-radius: 20px;
+                        overflow: hidden;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #4caf50, #45a049);
+                        color: white;
+                        padding: 40px 30px;
+                        text-align: center;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                    }
+                    .alert-box {
+                        background: #d4edda;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                        border-left: 5px solid #28a745;
+                    }
+                    .warning-box {
+                        background: #fff3cd;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                        border-left: 5px solid #ffc107;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #4caf50, #45a049);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        font-weight: bold;
+                    }
+                    .footer {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        text-align: center;
+                        font-size: 12px;
+                        color: #666;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>🔐 Password Changed Successfully!</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${name},</h2>
+                        <div class="alert-box">
+                            <p>✅ Your account password has been successfully changed.</p>
+                            <p><strong>Registration ID:</strong> ${registrationId}</p>
+                            <p><strong>Email:</strong> ${email}</p>
+                            <p><strong>Changed On:</strong> ${new Date().toLocaleString()}</p>
+                        </div>
+                        
+                        <div class="warning-box">
+                            <p><strong>⚠️ Security Alert:</strong> If you did NOT change your password, please contact our support team immediately.</p>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">Login to Your Account</a>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `🔐 Password Changed Successfully - ${registrationId}`,
+            html: emailHTML
+        });
+        console.log('✅ Password change confirmation email sent to:', email);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Password change email failed:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+
 // Send notification to all admins
 async function sendNotificationToAdmins(title, message, type, relatedId = null) {
     try {
@@ -378,27 +802,72 @@ async function sendAdminEmailNotification(adminEmail, adminName, studentName, st
             <meta charset="UTF-8">
             <title>New Student Registration - Action Required</title>
             <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                .header { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 30px; text-align: center; }
-                .content { background: #f9f9f9; padding: 30px; }
-                .button { display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; border-radius: 5px; }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    padding: 20px;
+                }
+                .container {
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 20px;
+                    overflow: hidden;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    padding: 40px 30px;
+                    text-align: center;
+                }
+                .content {
+                    padding: 40px 30px;
+                }
+                .student-details {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 15px;
+                    margin: 20px 0;
+                }
+                .button {
+                    display: inline-block;
+                    padding: 14px 35px;
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 50px;
+                    font-weight: bold;
+                }
+                .footer {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                }
             </style>
         </head>
         <body>
             <div class="container">
-                <div class="header"><h1>New Student Registration! 🎓</h1></div>
+                <div class="header">
+                    <h1>🎓 New Student Registration!</h1>
+                    <p>Action Required</p>
+                </div>
                 <div class="content">
                     <h2>Dear ${adminName},</h2>
                     <p>A new student has registered and is awaiting your approval.</p>
-                    <div style="background: white; padding: 15px; border-radius: 8px;">
-                        <p><strong>Name:</strong> ${studentName}</p>
+                    <div class="student-details">
+                        <p><strong>Student Name:</strong> ${studentName}</p>
                         <p><strong>Email:</strong> ${studentEmail}</p>
                         <p><strong>Registration ID:</strong> ${registrationId}</p>
                     </div>
                     <div style="text-align: center;">
-                        <a href="http://localhost:5173/admin/approvals" class="button">Review Registration</a>
+                        <a href="http://localhost:5173/admin/approvals" class="button">📋 Review Registration</a>
                     </div>
+                </div>
+                <div class="footer">
+                    <p>© ${new Date().getFullYear()} Intense Beauty Academy</p>
                 </div>
             </div>
         </body>
@@ -409,7 +878,7 @@ async function sendAdminEmailNotification(adminEmail, adminName, studentName, st
         await transporter.sendMail({
             from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
             to: adminEmail,
-            subject: `New Student Registration - Action Required (${registrationId})`,
+            subject: `🎓 New Student Registration - Action Required (${registrationId})`,
             html: emailHTML
         });
         console.log(`✅ Admin email sent to: ${adminEmail}`);
@@ -420,11 +889,12 @@ async function sendAdminEmailNotification(adminEmail, adminName, studentName, st
     }
 }
 
+
 // Send email to student about approval/rejection
 async function sendStudentApprovalEmail(studentEmail, studentName, registrationId, status, remarks = '') {
     const isApproved = status === 'approved';
-    const headerColor = isApproved ? 'linear-gradient(135deg, #4caf50, #45a049)' : 'linear-gradient(135deg, #f44336, #da190b)';
-    const title = isApproved ? 'Registration Approved! ✅' : 'Registration Update 📋';
+    const gradientColor = isApproved ? 'linear-gradient(135deg, #4caf50, #45a049)' : 'linear-gradient(135deg, #f44336, #da190b)';
+    const title = isApproved ? '✅ Registration Approved!' : '📋 Registration Update';
     const message = isApproved 
         ? 'Congratulations! Your registration has been approved. You can now access the student portal.'
         : 'We regret to inform you that your registration cannot be approved at this time.';
@@ -432,21 +902,89 @@ async function sendStudentApprovalEmail(studentEmail, studentName, registrationI
     const emailHTML = `
         <!DOCTYPE html>
         <html>
-        <head><meta charset="UTF-8"><title>Registration ${isApproved ? 'Approved' : 'Update'}</title></head>
+        <head>
+            <meta charset="UTF-8">
+            <title>Registration ${isApproved ? 'Approved' : 'Update'}</title>
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    padding: 20px;
+                }
+                .container {
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 20px;
+                    overflow: hidden;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                }
+                .header {
+                    background: ${gradientColor};
+                    color: white;
+                    padding: 40px 30px;
+                    text-align: center;
+                }
+                .content {
+                    padding: 40px 30px;
+                }
+                .info-box {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 15px;
+                    margin: 20px 0;
+                }
+                .remarks-box {
+                    background: #fff3cd;
+                    padding: 20px;
+                    border-radius: 15px;
+                    margin: 20px 0;
+                    border-left: 5px solid #ffc107;
+                }
+                .button {
+                    display: inline-block;
+                    padding: 14px 35px;
+                    background: ${gradientColor};
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 50px;
+                    font-weight: bold;
+                }
+                .footer {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                }
+            </style>
+        </head>
         <body>
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: ${headerColor}; color: white; padding: 30px; text-align: center;">
+            <div class="container">
+                <div class="header">
                     <h1>${title}</h1>
                 </div>
-                <div style="background: #f9f9f9; padding: 30px;">
+                <div class="content">
                     <h2>Dear ${studentName},</h2>
                     <p>${message}</p>
-                    <div style="background: white; padding: 15px;">
+                    <div class="info-box">
                         <p><strong>Registration ID:</strong> ${registrationId}</p>
                         <p><strong>Status:</strong> ${status.toUpperCase()}</p>
                     </div>
-                    ${remarks ? `<div style="background: #fff3cd; padding: 15px;"><strong>Remarks:</strong> ${remarks}</div>` : ''}
-                    ${isApproved ? `<div style="text-align: center;"><a href="http://localhost:5173/user/login" style="display: inline-block; padding: 12px 30px; background: ${headerColor}; color: white; text-decoration: none;">Login to Student Portal</a></div>` : ''}
+                    ${remarks ? `
+                    <div class="remarks-box">
+                        <strong>📝 Remarks:</strong>
+                        <p>${remarks}</p>
+                    </div>
+                    ` : ''}
+                    ${isApproved ? `
+                    <div style="text-align: center;">
+                        <a href="http://localhost:5173/user/login" class="button">🚀 Login to Student Portal</a>
+                    </div>
+                    ` : ''}
+                </div>
+                <div class="footer">
+                    <p>© ${new Date().getFullYear()} Intense Beauty Academy</p>
                 </div>
             </div>
         </body>
@@ -457,61 +995,291 @@ async function sendStudentApprovalEmail(studentEmail, studentName, registrationI
         await transporter.sendMail({
             from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
             to: studentEmail,
-            subject: `Registration ${isApproved ? 'Approved' : 'Update'} - ${registrationId}`,
+            subject: `${isApproved ? '✅ Registration Approved' : '📋 Registration Update'} - ${registrationId}`,
             html: emailHTML
         });
         console.log(`✅ Student ${status} email sent to: ${studentEmail}`);
         return { success: true };
     } catch (error) {
         console.error(`❌ Student email failed:`, error);
-        return { success: false };
+        return { success: false, error: error.message };
     }
 }
-
-// Send welcome email to student
-const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
-    const { name, email, registrationId, packageDetails, dateOfJoin } = userData;
-    
-    const emailHTML = `
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="UTF-8"><title>Welcome to Intense Beauty Academy</title></head>
-        <body>
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: linear-gradient(135deg, #ff6b6b, #ff8e8e); color: white; padding: 30px; text-align: center;">
-                    <h1>Welcome to Intense Beauty Academy! 🎓</h1>
-                </div>
-                <div style="background: white; padding: 30px;">
-                    <h2>Dear ${name},</h2>
-                    <p>Thank you for registering at Intense Beauty Academy.</p>
-                    <div style="background: #fff3cd; padding: 20px;">
-                        <p><strong>Registration ID:</strong> ${registrationId}</p>
-                        <p><strong>Email:</strong> ${email}</p>
-                        <p><strong>Default Password:</strong> ${defaultPassword}</p>
-                        <p><strong>Course Package:</strong> ${packageDetails}</p>
-                    </div>
-                    <p><strong>Important:</strong> Please change your password after first login.</p>
-                    <div style="text-align: center;">
-                        <a href="http://localhost:5173/user/login" style="display: inline-block; padding: 12px 30px; background: linear-gradient(135deg, #ff6b6b, #ff8e8e); color: white; text-decoration: none;">Login to Student Portal</a>
-                    </div>
-                </div>
-            </div>
-        </body>
-        </html>
-    `;
-    
+// Send email notification for payment update
+const sendPaymentUpdateEmail = async (student, oldAmount, newAmount, dueAmount) => {
     try {
+        const amountDifference = newAmount - oldAmount;
+        const isIncrease = amountDifference > 0;
+        
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Payment Update Notification</title>
+                <style>
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        padding: 20px;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background: white;
+                        border-radius: 20px;
+                        overflow: hidden;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    }
+                   .header {
+    background: linear-gradient(135deg, #4b0082 0%, #8a2be2 100%);
+    color: white;
+    padding: 40px 30px;
+    text-align: center;
+}
+                    .header h1 {
+                        font-size: 28px;
+                        margin-bottom: 10px;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                    }
+                    .update-box {
+                        background: #e3f2fd;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                        border-left: 5px solid #2196f3;
+                    }
+                    .amount-change {
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: ${isIncrease ? '#4caf50' : '#f44336'};
+                        text-align: center;
+                        padding: 15px;
+                        background: ${isIncrease ? '#e8f5e9' : '#ffebee'};
+                        border-radius: 10px;
+                        margin: 15px 0;
+                    }
+                    .details {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                    }
+                    .info-row {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 10px 0;
+                        border-bottom: 1px solid #e0e0e0;
+                    }
+                    .info-label {
+                        font-weight: bold;
+                        color: #555;
+                    }
+                    .info-value {
+                        color: #333;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #2196f3, #1976d2);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        margin-top: 25px;
+                        font-weight: bold;
+                        text-align: center;
+                    }
+                    .footer {
+                        background: #f8f9fa;
+                        padding: 20px 30px;
+                        text-align: center;
+                        font-size: 12px;
+                        color: #666;
+                        border-top: 1px solid #e0e0e0;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>💰 Payment Update Notification</h1>
+                        <p>Your payment record has been updated</p>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${student.name},</h2>
+                        <p>Your payment record has been updated by the administrator. Please review the changes below:</p>
+                        
+                        <div class="update-box">
+                            <h3>📊 Payment Update Details</h3>
+                            <div class="info-row">
+                                <span class="info-label">Previous Amount:</span>
+                                <span class="info-value">₹${oldAmount.toLocaleString()}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">New Amount:</span>
+                                <span class="info-value">₹${newAmount.toLocaleString()}</span>
+                            </div>
+                            <div class="amount-change">
+                                ${isIncrease ? '↑ Amount Increased by' : '↓ Amount Decreased by'} ₹${Math.abs(amountDifference).toLocaleString()}
+                            </div>
+                        </div>
+                        
+                        <div class="details">
+                            <h3>📚 Updated Payment Summary</h3>
+                            <div class="info-row">
+                                <span class="info-label">Registration ID:</span>
+                                <span class="info-value">${student.registrationId}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Course Package:</span>
+                                <span class="info-value">${student.packageDetails || 'N/A'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Total Package Price:</span>
+                                <span class="info-value">${student.packagePrice || '₹0'}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Total Paid Amount:</span>
+                                <span class="info-value">₹${student.paymentAmount.toLocaleString()}</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Remaining Due:</span>
+                                <span class="info-value" style="color: ${dueAmount > 0 ? '#f59e0b' : '#4caf50'}; font-weight: bold;">
+                                    ${dueAmount > 0 ? `₹${dueAmount.toLocaleString()}` : '✅ Fully Paid'}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">View Payment History</a>
+                        </div>
+                        
+                        <div style="margin-top: 30px; padding: 15px; background: #fff3cd; border-radius: 10px;">
+                            <p style="margin: 0; color: #856404;">
+                                <strong>📝 Note:</strong> If you have any questions about this payment update, please contact the academy administration.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>This is an automated email. Please do not reply to this message.</p>
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
         await transporter.sendMail({
             from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
-            to: email,
-            subject: `Welcome to Intense Beauty Academy - Your Login Credentials (ID: ${registrationId})`,
+            to: student.email,
+            subject: `💰 Payment Update Notification - ${student.registrationId}`,
             html: emailHTML
         });
-        console.log('✅ Student welcome email sent to:', email);
+        console.log(`✅ Payment update email sent to: ${student.email}`);
         return { success: true };
     } catch (error) {
-        console.error('❌ Student email failed:', error);
-        return { success: false };
+        console.error('❌ Payment update email failed:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// Send email notification for new payment
+const sendNewPaymentEmail = async (student, amount, dueAmount) => {
+    try {
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>New Payment Received</title>
+                <style>
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        padding: 20px;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background: white;
+                        border-radius: 20px;
+                        overflow: hidden;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #4caf50, #45a049);
+                        color: white;
+                        padding: 40px 30px;
+                        text-align: center;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                    }
+                    .payment-details {
+                        background: #e8f5e9;
+                        padding: 20px;
+                        border-radius: 15px;
+                        margin: 20px 0;
+                        border-left: 5px solid #4caf50;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #4caf50, #45a049);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        margin-top: 25px;
+                    }
+                    .footer {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        text-align: center;
+                        font-size: 12px;
+                        color: #666;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>💰 New Payment Received!</h1>
+                        <p>Payment has been recorded successfully</p>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${student.name},</h2>
+                        <p>A new payment has been recorded for your account.</p>
+                        
+                        <div class="payment-details">
+                            <h3>📊 Payment Details</h3>
+                            <p><strong>Amount Paid:</strong> ₹${amount.toLocaleString()}</p>
+                            <p><strong>Remaining Due:</strong> ${dueAmount > 0 ? `₹${dueAmount.toLocaleString()}` : '✅ Fully Paid'}</p>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">View Payment History</a>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: student.email,
+            subject: `💰 New Payment Received - ${student.registrationId}`,
+            html: emailHTML
+        });
+        console.log(`✅ New payment email sent to: ${student.email}`);
+    } catch (error) {
+        console.error('❌ New payment email failed:', error);
     }
 };
 
@@ -560,150 +1328,141 @@ const verifyAdminToken = async (req, res, next) => {
 // ==================== API ENDPOINTS ====================
 
 // Student Registration
-// Student Registration (UPDATED with Payment Fields)
 app.post('/api/register', async (req, res) => {
     try {
         const { 
-            name, fatherName, dateOfBirth, aadharNumber, presentAddress, permanentAddress,
-            dateOfJoin, packageDetails, packageValue, packagePrice, packageDuration,
-            contactNumber, altContactNumber, email,
-            // Payment fields
-            paymentMethod, paymentAmount, transactionId, paymentStatus
+            fullName, fatherName, dob, aadhar, presentAddress, permanentAddress,
+            joinDate, package: packageValue, packagePrice, dueAmount,
+            contact, altContact, email,
+            paymentMethod, paidAmount, transactionId
         } = req.body;
-        
-        // Validate payment amount
-        const packagePriceNum = parseInt(packagePrice ? packagePrice.replace(/[^0-9]/g, '') : 0);
-        const paidAmount = paymentAmount || 0;
-        
-        if (paidAmount > packagePriceNum) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Paid amount cannot exceed package price' 
-            });
+
+        const name = fullName;
+        const aadharNumber = aadhar;
+        const contactNumber = contact;
+        const altContactNumber = altContact;
+        const dateOfBirth = new Date(dob);
+        const dateOfJoin = new Date(joinDate);
+
+        const rawPrice = packagePrice ? String(packagePrice).replace(/[^0-9]/g, '') : "0";
+        const packagePriceNum = parseInt(rawPrice, 10) || 0;
+        const paymentAmountNum = parseFloat(paidAmount) || 0;
+        const finalDueAmount = packagePriceNum - paymentAmountNum;
+
+        if (isNaN(dateOfBirth.getTime()) || isNaN(dateOfJoin.getTime())) {
+            return res.status(400).json({ success: false, message: 'Invalid date format for DOB or Join Date' });
         }
-        
-        // Validate transaction ID for UPI payments
-        if (paymentMethod === 'UPI' && !transactionId) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Transaction ID is required for UPI/Online payments' 
-            });
-        }
-        
-        const existingUser = await User.findOne({ $or: [{ email }, { aadharNumber }] });
+
+        const existingUser = await User.findOne({ $or: [{ email: email.toLowerCase() }, { aadharNumber }] });
         if (existingUser) {
-            return res.status(400).json({ success: false, message: 'User already exists' });
+            return res.status(400).json({ success: false, message: 'Email or Aadhar already exists' });
         }
-        
+
         const defaultPassword = generateDefaultPassword();
         
-        const user = new User({
-            name, 
-            fatherName, 
-            dateOfBirth: new Date(dateOfBirth), 
+        const userData = {
+            name,
+            fatherName,
+            dateOfBirth,
             aadharNumber,
-            presentAddress, 
-            permanentAddress, 
-            dateOfJoin: new Date(dateOfJoin),
-            packageDetails, 
-            packageValue, 
-            packagePrice, 
-            packageDuration,
-            contactNumber, 
-            altContactNumber, 
+            presentAddress,
+            permanentAddress,
+            dateOfJoin,
+            packageDetails: packageValue,
+            packageValue,
+            packagePrice: `₹${packagePriceNum.toLocaleString()}`,
+            dueAmount: finalDueAmount,
+            contactNumber,
+            altContactNumber,
             email: email.toLowerCase(),
-            password: defaultPassword, 
-            isPasswordChanged: false, 
-            status: 'pending',
-            // Payment fields
-            paymentMethod: paymentMethod || null,
-            paymentAmount: paidAmount,
-            transactionId: transactionId || null,
-            paymentStatus: paymentStatus || (paidAmount >= packagePriceNum ? 'completed' : 'pending'),
-            paymentDate: paidAmount > 0 ? new Date() : null
-        });
-        
+            password: defaultPassword,
+            paymentMethod: paymentMethod ? (paymentMethod === 'UPI' ? 'UPI' : 'Cash') : null,
+            paymentAmount: paymentAmountNum,
+            paymentStatus: paymentAmountNum >= packagePriceNum ? 'completed' : 'pending',
+            paymentDate: paymentAmountNum > 0 ? new Date() : null,
+            transactionId: (paymentMethod === 'UPI' && transactionId) ? transactionId : null
+        };
+
+        const user = new User(userData);
         await user.save();
-        
-        // Create progress record
+
+        // ✅ CREATE PAYMENT RECORD IN PAYMENT COLLECTION
+   if (paymentAmountNum > 0) {
+    const paymentRecord = new Payment({
+        studentId: user._id,
+        studentName: user.name,
+        registrationId: user.registrationId,
+        amount: paymentAmountNum,
+        dueAmount: finalDueAmount,  // ✅ Store due amount in payment record
+        paymentDate: new Date(),
+        status: paymentAmountNum >= packagePriceNum ? 'completed' : 'partial',
+        paymentMethod: paymentMethod === 'UPI' ? 'UPI' : 'Cash',
+        transactionId: (paymentMethod === 'UPI' && transactionId) ? transactionId : `REG-${user.registrationId}`,
+        remarks: `Initial registration payment for ${user.packageDetails}`,
+        coursePackage: user.packageDetails,
+        packagePrice: packagePriceNum
+    });
+    await paymentRecord.save();
+    console.log(`✅ Payment record created for ${user.name} - Amount: ₹${paymentAmountNum}, Due: ₹${finalDueAmount}`);
+}
+        // Create initial progress record
         const initialProgress = new StudentProgress({
             studentId: user._id, 
             registrationId: user.registrationId,
             courseProgress: { 
                 totalModules: 12, 
-                completedModules: 0, 
                 currentModule: "Introduction to Beauty & Cosmetology", 
-                nextModule: "Skin Care Fundamentals", 
-                assignments: 3, 
-                completedAssignments: 0, 
-                moduleProgress: [] 
+                completedModules: 0 
             },
             recentActivities: [{ 
-                activity: `Registered for ${packageDetails} course with ${paidAmount >= packagePriceNum ? 'full' : 'partial'} payment`, 
+                activity: `Registered with ₹${paymentAmountNum} payment. Balance due: ₹${finalDueAmount}`, 
                 type: 'achievement' 
             }]
         });
         await initialProgress.save();
-        
-        // If payment is completed, also create a payment record
-        if (paidAmount >= packagePriceNum && paymentMethod) {
-            const payment = new Payment({
-                studentId: user._id,
-                studentName: name,
-                registrationId: user.registrationId,
-                amount: paidAmount,
-                paymentDate: new Date(),
-                status: 'completed',
-                paymentMethod: paymentMethod === 'UPI' ? 'UPI' : 'Cash',
-                transactionId: transactionId || `REG-${user.registrationId}`,
-                remarks: `Registration payment for ${packageDetails}`
-            });
-            await payment.save();
-        }
-        
-        // Send welcome email
-        await sendStudentWelcomeEmail({ 
-            name, 
-            email, 
-            registrationId: user.registrationId, 
-            packageDetails, 
-            dateOfJoin 
+
+        // Send welcome email to student
+        await sendStudentWelcomeEmail({
+            name: user.name,
+            email: user.email,
+            registrationId: user.registrationId,
+            packageDetails: user.packageDetails,
+            packagePrice: user.packagePrice,
+            paymentAmount: user.paymentAmount,
+            dueAmount: user.dueAmount,
+            dateOfJoin: user.dateOfJoin
         }, defaultPassword);
-        
+
         // Send notifications to admins
-        const admins = await Admin.find({ 
-            role: { $in: ['super_admin', 'hr_manager', 'admin'] }, 
-            isActive: true 
-        });
-        
+        const admins = await Admin.find({ role: { $in: ['super_admin', 'hr_manager', 'admin'] }, isActive: true });
         for (const admin of admins) {
             await sendAdminEmailNotification(admin.email, admin.name, user.name, user.email, user.registrationId);
         }
         
         await sendNotificationToAdmins(
             'New Student Registration', 
-            `${user.name} (${user.registrationId}) has registered with ${paidAmount >= packagePriceNum ? 'full' : 'partial'} payment.`, 
+            `${user.name} (${user.registrationId}) has registered. Payment: ₹${paymentAmountNum}, Due: ₹${finalDueAmount}`, 
             'registration', 
             user._id
         );
-        
-        const userResponse = user.toObject();
-        delete userResponse.password;
-        
+
         res.status(201).json({ 
             success: true, 
             message: 'Registration successful! Login credentials sent to your email.', 
-            data: userResponse 
+            registrationId: user.registrationId,
+            paymentRecord: paymentAmountNum > 0 ? true : false
         });
+
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error during registration', 
+            message: 'Server Error during registration', 
             error: error.message 
         });
     }
 });
+
 
 // Student Login
 app.post('/api/user/login', async (req, res) => {
@@ -719,9 +1478,146 @@ app.post('/api/user/login', async (req, res) => {
         const userData = user.toObject();
         delete userData.password;
         
-        res.status(200).json({ success: true, message: 'Login successful', data: { user: userData, token, requiresPasswordChange: !user.isPasswordChanged } });
+        res.status(200).json({ 
+            success: true, 
+            message: 'Login successful', 
+            data: { 
+                user: userData, 
+                token, 
+                requiresPasswordChange: !user.isPasswordChanged 
+            } 
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Error logging in', error: error.message });
+    }
+});
+
+// Student - First Time Password Change
+app.post('/api/student/first-time-password', verifyStudentToken, async (req, res) => {
+    try {
+        const { newPassword } = req.body;
+
+        if (!newPassword || newPassword.length < 6) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'New password is required and must be at least 6 characters long' 
+            });
+        }
+
+        const user = await User.findById(req.user._id);
+        
+        if (!user) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Student record not found' 
+            });
+        }
+
+        // Update password
+        user.password = newPassword;
+        user.isPasswordChanged = true;
+        user.lastPasswordChange = new Date();
+        
+        await user.save();
+
+        // Send password change confirmation email
+        await sendPasswordChangeConfirmation({
+            name: user.name,
+            email: user.email,
+            registrationId: user.registrationId
+        });
+
+        // Send notification to admins about password change
+        await sendNotificationToAdmins(
+            'Password Change', 
+            `${user.name} (${user.registrationId}) has changed their password.`, 
+            'password_change', 
+            user._id
+        );
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Your password has been changed successfully! A confirmation email has been sent.' 
+        });
+    } catch (error) {
+        console.error('First-time password error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error updating password', 
+            error: error.message 
+        });
+    }
+});
+
+// Student - Change Password (for existing users)
+app.put('/api/student/change-password', verifyStudentToken, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Current password and new password are required' 
+            });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'New password must be at least 6 characters long' 
+            });
+        }
+
+        const user = await User.findById(req.user._id).select('+password');
+        
+        if (!user) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Student record not found' 
+            });
+        }
+
+        // Verify current password
+        const isPasswordValid = await user.comparePassword(currentPassword);
+        if (!isPasswordValid) {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Current password is incorrect' 
+            });
+        }
+
+        // Update to new password
+        user.password = newPassword;
+        user.lastPasswordChange = new Date();
+        
+        await user.save();
+
+        // Send password change confirmation email
+        await sendPasswordChangeConfirmation({
+            name: user.name,
+            email: user.email,
+            registrationId: user.registrationId
+        });
+
+        // Send notification to admins
+        await sendNotificationToAdmins(
+            'Password Change', 
+            `${user.name} (${user.registrationId}) has changed their password.`, 
+            'password_change', 
+            user._id
+        );
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Password changed successfully! A confirmation email has been sent.' 
+        });
+    } catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error changing password', 
+            error: error.message 
+        });
     }
 });
 
@@ -739,7 +1635,15 @@ app.post('/api/login', async (req, res) => {
         const adminData = admin.toObject();
         delete adminData.password;
         
-        res.status(200).json({ success: true, message: 'Login successful', data: { admin: adminData, token, requiresPasswordChange: !admin.isPasswordChanged } });
+        res.status(200).json({ 
+            success: true, 
+            message: 'Login successful', 
+            data: { 
+                admin: adminData, 
+                token, 
+                requiresPasswordChange: !admin.isPasswordChanged 
+            } 
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Error logging in', error: error.message });
     }
@@ -1068,48 +1972,180 @@ app.put('/api/admins/:id', async (req, res) => {
 });
 
 // Admin - Delete Admin
-app.delete('/api/admins/:id', async (req, res) => {
+// Delete payment - FIXED to recalculate due amount
+app.delete('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) {
-            return res.status(401).json({ success: false, message: 'No token provided' });
+        const payment = await Payment.findById(req.params.paymentId);
+        if (!payment) {
+            return res.status(404).json({ success: false, message: 'Payment not found' });
         }
-
-        try {
-            jwt.verify(token, JWT_SECRET);
-        } catch (err) {
-            return res.status(401).json({ success: false, message: 'Invalid or expired token' });
-        }
-
-        const { id } = req.params;
-
-        const admin = await Admin.findById(id);
-        if (!admin) {
-            return res.status(404).json({ success: false, message: 'Employee not found' });
-        }
-
-        if (admin.role === 'super_admin') {
-            const superAdminCount = await Admin.countDocuments({ role: 'super_admin' });
-            if (superAdminCount === 1) {
-                return res.status(400).json({ success: false, message: 'Cannot delete the only Super Admin user' });
+        
+        const student = await User.findById(payment.studentId);
+        if (student) {
+            // Get all remaining payments excluding this one
+            const remainingPayments = await Payment.find({ 
+                studentId: payment.studentId,
+                _id: { $ne: req.params.paymentId }
+            });
+            
+            const totalPaid = remainingPayments.reduce((sum, p) => sum + p.amount, 0);
+            const packagePriceNum = parseInt(String(student.packagePrice).replace(/[^0-9]/g, '')) || 0;
+            const newDueAmount = packagePriceNum - totalPaid;
+            
+            // Update student's payment totals
+            student.paymentAmount = totalPaid;
+            student.dueAmount = newDueAmount > 0 ? newDueAmount : packagePriceNum;
+            student.paymentStatus = totalPaid >= packagePriceNum ? 'completed' : 'pending';
+            
+            // If no payments left, clear transaction details
+            if (remainingPayments.length === 0) {
+                student.transactionId = null;
+                student.paymentMethod = null;
+                student.paymentDate = null;
+            } else {
+                // Get the latest payment
+                const latestPayment = remainingPayments.sort((a, b) => b.paymentDate - a.paymentDate)[0];
+                student.transactionId = latestPayment.transactionId;
+                student.paymentMethod = latestPayment.paymentMethod;
+                student.paymentDate = latestPayment.paymentDate;
+            }
+            
+            await student.save();
+            
+            // Update remaining payments' due amounts
+            let runningTotal = 0;
+            const sortedPayments = remainingPayments.sort((a, b) => a.paymentDate - b.paymentDate);
+            
+            for (const p of sortedPayments) {
+                runningTotal += p.amount;
+                const dueAfterThis = packagePriceNum - runningTotal;
+                p.dueAmount = dueAfterThis > 0 ? dueAfterThis : 0;
+                p.status = dueAfterThis <= 0 ? 'completed' : 'partial';
+                await p.save();
             }
         }
-
-        await Admin.findByIdAndDelete(id);
-
-        res.status(200).json({ success: true, message: 'Employee deleted successfully' });
+        
+        await Payment.findByIdAndDelete(req.params.paymentId);
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Payment deleted successfully' 
+        });
     } catch (error) {
-        console.error('Delete admin error:', error);
-        res.status(500).json({ success: false, message: 'Error deleting employee', error: error.message });
+        console.error('Error deleting payment:', error);
+        res.status(500).json({ success: false, message: 'Error deleting payment', error: error.message });
     }
 });
 
 // ==================== PAYMENT ENDPOINTS ====================
 
-// Get all payments
+// Create new payment - FIXED to calculate due amount correctly
+// Create new payment - FIXED with correct due amount calculation
+app.post('/api/admin/payments', verifyAdminToken, async (req, res) => {
+    try {
+        const { studentId, studentName, amount, paymentDate, status, paymentMethod, transactionId, remarks } = req.body;
+        
+        const student = await User.findById(studentId);
+        if (!student) {
+            return res.status(404).json({ success: false, message: 'Student not found' });
+        }
+        
+        // Get package price as number
+        const packagePriceNum = parseInt(String(student.packagePrice).replace(/[^0-9]/g, '')) || 0;
+        
+        // Get ALL existing payments for this student
+        const existingPayments = await Payment.find({ studentId }).sort({ paymentDate: 1, createdAt: 1 });
+        const totalPaidSoFar = existingPayments.reduce((sum, p) => sum + p.amount, 0);
+        
+        // Calculate new totals
+        const newAmount = parseFloat(amount) || 0;
+        const newTotalPaid = totalPaidSoFar + newAmount;
+        const newDueAmount = packagePriceNum - newTotalPaid;
+        
+        // Generate transaction ID if not provided
+        let finalTransactionId = transactionId;
+        if (!finalTransactionId) {
+            const prefix = 'TXN';
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const count = await Payment.countDocuments();
+            finalTransactionId = `${prefix}${year}${month}${String(count + 1).padStart(6, '0')}`;
+        }
+        
+        // Determine payment status
+        let paymentStatus = 'pending';
+        if (newDueAmount <= 0) {
+            paymentStatus = 'completed';
+        } else if (newAmount > 0 && newDueAmount > 0) {
+            paymentStatus = 'partial';
+        }
+        
+        // Create new payment record
+        const payment = new Payment({
+            studentId,
+            studentName,
+            registrationId: student.registrationId,
+            amount: newAmount,
+            dueAmount: newDueAmount > 0 ? newDueAmount : 0,
+            paymentDate: paymentDate || new Date(),
+            status: paymentStatus,
+            paymentMethod,
+            transactionId: finalTransactionId,
+            remarks: remarks || `Payment for ${student.packageDetails}`,
+            coursePackage: student.packageDetails,
+            packagePrice: packagePriceNum
+        });
+        
+        await payment.save();
+        
+        // UPDATE ALL EXISTING PAYMENTS' DUE AMOUNTS
+        const allPayments = [...existingPayments, payment];
+        allPayments.sort((a, b) => new Date(a.paymentDate) - new Date(b.paymentDate));
+        
+        let runningTotal = 0;
+        for (const p of allPayments) {
+            runningTotal += p.amount;
+            const dueAfterThis = packagePriceNum - runningTotal;
+            p.dueAmount = dueAfterThis > 0 ? dueAfterThis : 0;
+            p.status = dueAfterThis <= 0 ? 'completed' : (p.amount > 0 ? 'partial' : 'pending');
+            await p.save();
+        }
+        
+        // Update student record
+        student.paymentAmount = newTotalPaid;
+        student.dueAmount = newDueAmount > 0 ? newDueAmount : 0;
+        student.paymentStatus = newDueAmount <= 0 ? 'completed' : 'pending';
+        student.paymentDate = paymentDate || new Date();
+        student.paymentMethod = paymentMethod;
+        student.transactionId = finalTransactionId;
+        await student.save();
+        
+        // Send email notification for new payment
+        await sendNewPaymentEmail(student, newAmount, newDueAmount);
+        
+        res.status(201).json({ 
+            success: true, 
+            message: 'Payment created successfully', 
+            data: payment,
+            updatedStudent: {
+                paymentAmount: student.paymentAmount,
+                dueAmount: student.dueAmount,
+                paymentStatus: student.paymentStatus
+            }
+        });
+    } catch (error) {
+        console.error('Error creating payment:', error);
+        if (error.code === 11000) {
+            return res.status(400).json({ success: false, message: 'Transaction ID already exists' });
+        }
+        res.status(500).json({ success: false, message: 'Error creating payment', error: error.message });
+    }
+});
+// Get all payments - Updated to include dueAmount
 app.get('/api/admin/payments', verifyAdminToken, async (req, res) => {
     try {
-        const { status, startDate, endDate } = req.query;
+        const { status, startDate, endDate, search } = req.query;
         let query = {};
         
         if (status && status !== 'all') {
@@ -1122,67 +2158,101 @@ app.get('/api/admin/payments', verifyAdminToken, async (req, res) => {
             if (endDate) query.paymentDate.$lte = new Date(endDate);
         }
         
-        const payments = await Payment.find(query).sort({ paymentDate: -1, createdAt: -1 });
-        res.status(200).json({ success: true, data: payments });
+        // Get all payments from Payment collection
+        let payments = await Payment.find(query)
+            .sort({ paymentDate: -1, createdAt: -1 })
+            .lean();
+        
+        // If search term provided, filter by student name or transaction ID
+        if (search) {
+            payments = payments.filter(payment => 
+                payment.studentName?.toLowerCase().includes(search.toLowerCase()) ||
+                payment.transactionId?.toLowerCase().includes(search.toLowerCase()) ||
+                payment.registrationId?.toLowerCase().includes(search.toLowerCase())
+            );
+        }
+        
+        // Enhance payment data with additional student info from User collection
+        const enhancedPayments = await Promise.all(payments.map(async (payment) => {
+            const student = await User.findById(payment.studentId).select('name email contactNumber packagePrice dueAmount packageDetails paymentAmount');
+            return {
+                ...payment,
+                studentDetails: student || null,
+                courseFee: student?.packagePrice || 'N/A',
+                totalPaid: student?.paymentAmount || 0,
+                remainingDue: student?.dueAmount || payment.dueAmount || 0,
+                contactNumber: student?.contactNumber || 'N/A',
+                packageDetails: student?.packageDetails || payment.coursePackage || 'N/A',
+                // Format amounts for display
+                formattedAmount: `₹${payment.amount.toLocaleString()}`,
+                formattedDueAmount: `₹${(payment.dueAmount || 0).toLocaleString()}`
+            };
+        }));
+        
+        res.status(200).json({ 
+            success: true, 
+            data: enhancedPayments,
+            total: enhancedPayments.length
+        });
     } catch (error) {
         console.error('Error fetching payments:', error);
         res.status(500).json({ success: false, message: 'Error fetching payments', error: error.message });
     }
 });
-
-// Create new payment
-app.post('/api/admin/payments', verifyAdminToken, async (req, res) => {
+// Get payment statistics - Updated with due amount analysis
+app.get('/api/admin/payments/status', verifyAdminToken, async (req, res) => {
     try {
-        const { studentId, studentName, amount, paymentDate, status, paymentMethod, transactionId, remarks } = req.body;
+        const payments = await Payment.find();
+        const students = await User.find();
         
-        const student = await User.findById(studentId);
-        if (!student) {
-            return res.status(404).json({ success: false, message: 'Student not found' });
-        }
+        const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
+        const completedAmount = payments
+            .filter(p => p.status === 'completed')
+            .reduce((sum, p) => sum + p.amount, 0);
+        const pendingAmount = payments
+            .filter(p => p.status === 'pending')
+            .reduce((sum, p) => sum + p.amount, 0);
+        const partialAmount = payments
+            .filter(p => p.status === 'partial')
+            .reduce((sum, p) => sum + p.amount, 0);
+        const successRate = totalRevenue > 0 ? Math.round((completedAmount / totalRevenue) * 100) : 0;
         
-        let finalTransactionId = transactionId;
-        if (!finalTransactionId) {
-            const prefix = 'TXN';
-            const date = new Date();
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const count = await Payment.countDocuments();
-            finalTransactionId = `${prefix}${year}${month}${String(count + 1).padStart(6, '0')}`;
-        }
+        // Calculate total due amount from all students
+        const totalDueAmount = students.reduce((sum, s) => sum + (s.dueAmount || 0), 0);
         
-        const payment = new Payment({
-            studentId,
-            studentName,
-            registrationId: student.registrationId,
-            amount,
-            paymentDate: paymentDate || new Date(),
-            status,
-            paymentMethod,
-            transactionId: finalTransactionId,
-            remarks
+        // Get students with pending dues
+        const studentsWithDues = students.filter(s => (s.dueAmount || 0) > 0);
+        const totalDueStudents = studentsWithDues.length;
+        const averageDueAmount = totalDueStudents > 0 ? totalDueAmount / totalDueStudents : 0;
+        
+        res.status(200).json({ 
+            success: true, 
+            data: {
+                totalRevenue,
+                completedAmount,
+                pendingAmount,
+                partialAmount,
+                successRate,
+                totalDueAmount,
+                totalDueStudents,
+                averageDueAmount,
+                totalPayments: payments.length,
+                completedCount: payments.filter(p => p.status === 'completed').length,
+                pendingCount: payments.filter(p => p.status === 'pending').length,
+                partialCount: payments.filter(p => p.status === 'partial').length,
+                failedCount: payments.filter(p => p.status === 'failed').length
+            }
         });
-        
-        await payment.save();
-        
-        if (status === 'completed') {
-            student.paymentStatus = 'completed';
-            student.paymentDate = paymentDate;
-            student.paymentMethod = paymentMethod;
-            student.transactionId = finalTransactionId;
-            await student.save();
-        }
-        
-        res.status(201).json({ success: true, message: 'Payment created successfully', data: payment });
     } catch (error) {
-        console.error('Error creating payment:', error);
-        if (error.code === 11000) {
-            return res.status(400).json({ success: false, message: 'Transaction ID already exists' });
-        }
-        res.status(500).json({ success: false, message: 'Error creating payment', error: error.message });
+        console.error('Error fetching payment stats:', error);
+        res.status(500).json({ success: false, message: 'Error fetching statistics', error: error.message });
     }
 });
 
 // Update payment
+// Update payment - FIXED to recalculate due amount
+// Update payment - COMPLETELY FIXED with recalculated due amount and email
+// Update payment - COMPLETELY FIXED with correct due amount calculation
 app.put('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
     try {
         const { amount, paymentDate, status, paymentMethod, transactionId, remarks } = req.body;
@@ -1192,6 +2262,174 @@ app.put('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => 
             return res.status(404).json({ success: false, message: 'Payment not found' });
         }
         
+        const student = await User.findById(payment.studentId);
+        if (!student) {
+            return res.status(404).json({ success: false, message: 'Student not found' });
+        }
+        
+        // Store old amount for comparison
+        const oldAmount = payment.amount;
+        
+        // Get package price as number
+        const packagePriceNum = parseInt(String(student.packagePrice).replace(/[^0-9]/g, '')) || 0;
+        
+        // Get ALL payments for this student (excluding the current one)
+        const allOtherPayments = await Payment.find({ 
+            studentId: payment.studentId,
+            _id: { $ne: req.params.paymentId }
+        }).sort({ paymentDate: 1, createdAt: 1 });
+        
+        // Calculate total paid from other payments
+        const totalPaidFromOthers = allOtherPayments.reduce((sum, p) => sum + p.amount, 0);
+        
+        // Calculate new total paid including updated payment
+        const newAmount = amount !== undefined ? amount : payment.amount;
+        const newTotalPaid = totalPaidFromOthers + newAmount;
+        
+        // Calculate new due amount
+        const newDueAmount = packagePriceNum - newTotalPaid;
+        
+        // Update current payment
+        if (amount !== undefined) payment.amount = amount;
+        if (paymentDate) payment.paymentDate = paymentDate;
+        if (paymentMethod) payment.paymentMethod = paymentMethod;
+        if (transactionId) payment.transactionId = transactionId;
+        if (remarks !== undefined) payment.remarks = remarks;
+        payment.updatedAt = new Date();
+        
+        // Set the due amount for THIS payment (remaining after this payment)
+        payment.dueAmount = newDueAmount > 0 ? newDueAmount : 0;
+        
+        // Set status for THIS payment
+        if (newDueAmount <= 0) {
+            payment.status = 'completed';
+        } else if (newAmount > 0 && newDueAmount > 0) {
+            payment.status = 'partial';
+        } else {
+            payment.status = 'pending';
+        }
+        
+        await payment.save();
+        
+        // UPDATE ALL OTHER PAYMENTS' DUE AMOUNTS (in chronological order)
+        // Combine all payments including the updated one
+        const allPayments = [...allOtherPayments, payment];
+        allPayments.sort((a, b) => new Date(a.paymentDate) - new Date(b.paymentDate));
+        
+        let runningTotal = 0;
+        for (const p of allPayments) {
+            runningTotal += p.amount;
+            const dueAfterThis = packagePriceNum - runningTotal;
+            p.dueAmount = dueAfterThis > 0 ? dueAfterThis : 0;
+            p.status = dueAfterThis <= 0 ? 'completed' : (p.amount > 0 ? 'partial' : 'pending');
+            await p.save();
+        }
+        
+        // Update student record
+        student.paymentAmount = newTotalPaid;
+        student.dueAmount = newDueAmount > 0 ? newDueAmount : 0;
+        student.paymentStatus = newDueAmount <= 0 ? 'completed' : 'pending';
+        student.paymentDate = paymentDate || payment.paymentDate;
+        student.paymentMethod = paymentMethod || payment.paymentMethod;
+        student.transactionId = transactionId || payment.transactionId;
+        await student.save();
+        
+        // Send email notification if amount changed
+        if (oldAmount !== newAmount) {
+            await sendPaymentUpdateEmail(student, oldAmount, newAmount, newDueAmount);
+        }
+        
+        // Return updated payment
+        const enhancedPayment = {
+            ...payment.toObject(),
+            studentDetails: {
+                _id: student._id,
+                name: student.name,
+                packagePrice: student.packagePrice,
+                dueAmount: student.dueAmount,
+                paymentAmount: student.paymentAmount,
+                email: student.email
+            },
+            totalPaid: newTotalPaid,
+            remainingDue: newDueAmount,
+            allPayments: allPayments.map(p => ({
+                amount: p.amount,
+                dueAmount: p.dueAmount,
+                paymentDate: p.paymentDate
+            }))
+        };
+        
+        res.status(200).json({ 
+            success: true, 
+            message: 'Payment updated successfully', 
+            data: enhancedPayment 
+        });
+    } catch (error) {
+        console.error('Error updating payment:', error);
+        res.status(500).json({ success: false, message: 'Error updating payment', error: error.message });
+    }
+});
+// Get single payment by ID
+
+app.get('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
+    try {
+        const payment = await Payment.findById(req.params.paymentId).lean();
+        if (!payment) {
+            return res.status(404).json({ success: false, message: 'Payment not found' });
+        }
+        
+        // Get complete student details
+        const student = await User.findById(payment.studentId).select('-password');
+        
+        const enhancedPayment = {
+            ...payment,
+            studentDetails: student,
+            courseFee: student?.packagePrice || 'N/A',
+            dueAmount: student?.dueAmount || 0,
+            contactNumber: student?.contactNumber || 'N/A',
+            email: student?.email || 'N/A'
+        };
+        
+        res.status(200).json({ success: true, data: enhancedPayment });
+    } catch (error) {
+        console.error('Error fetching payment:', error);
+        res.status(500).json({ success: false, message: 'Error fetching payment', error: error.message });
+    }
+});
+app.get('/api/admin/student-payments/:studentId', verifyAdminToken, async (req, res) => {
+    try {
+        const payments = await Payment.find({ studentId: req.params.studentId })
+            .sort({ paymentDate: -1 });
+        
+        const student = await User.findById(req.params.studentId).select('name registrationId packagePrice dueAmount paymentAmount');
+        
+        res.status(200).json({ 
+            success: true, 
+            data: {
+                studentDetails: student,
+                payments: payments,
+                totalPaid: student?.paymentAmount || 0,
+                dueAmount: student?.dueAmount || 0
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching student payments:', error);
+        res.status(500).json({ success: false, message: 'Error fetching student payments', error: error.message });
+    }
+});
+// Delete payment
+app.put('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
+    try {
+        const { amount, paymentDate, status, paymentMethod, transactionId, remarks } = req.body;
+        
+        const payment = await Payment.findById(req.params.paymentId);
+        if (!payment) {
+            return res.status(404).json({ success: false, message: 'Payment not found' });
+        }
+        
+        const oldAmount = payment.amount;
+        
+        // Update payment fields
         if (amount) payment.amount = amount;
         if (paymentDate) payment.paymentDate = paymentDate;
         if (status) payment.status = status;
@@ -1202,49 +2440,51 @@ app.put('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => 
         
         await payment.save();
         
-        if (status === 'completed') {
+        // Update student's payment totals if amount changed
+        if (amount && amount !== oldAmount) {
             const student = await User.findById(payment.studentId);
             if (student) {
-                student.paymentStatus = 'completed';
-                student.paymentDate = paymentDate || payment.paymentDate;
-                student.paymentMethod = paymentMethod || payment.paymentMethod;
-                student.transactionId = transactionId || payment.transactionId;
+                const paymentDifference = amount - oldAmount;
+                const newPaidAmount = (student.paymentAmount || 0) + paymentDifference;
+                const packagePriceNum = parseInt(String(student.packagePrice).replace(/[^0-9]/g, '')) || 0;
+                const newDueAmount = packagePriceNum - newPaidAmount;
+                
+                student.paymentAmount = newPaidAmount;
+                student.dueAmount = newDueAmount > 0 ? newDueAmount : 0;
+                student.paymentStatus = newPaidAmount >= packagePriceNum ? 'completed' : 'pending';
                 await student.save();
             }
         }
         
-        res.status(200).json({ success: true, message: 'Payment updated successfully', data: payment });
+        res.status(200).json({ 
+            success: true, 
+            message: 'Payment updated successfully', 
+            data: payment 
+        });
     } catch (error) {
         console.error('Error updating payment:', error);
         res.status(500).json({ success: false, message: 'Error updating payment', error: error.message });
     }
 });
 
-// Delete payment
-app.delete('/api/admin/payments/:paymentId', verifyAdminToken, async (req, res) => {
-    try {
-        const payment = await Payment.findById(req.params.paymentId);
-        if (!payment) {
-            return res.status(404).json({ success: false, message: 'Payment not found' });
-        }
-        
-        await Payment.findByIdAndDelete(req.params.paymentId);
-        res.status(200).json({ success: true, message: 'Payment deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting payment:', error);
-        res.status(500).json({ success: false, message: 'Error deleting payment', error: error.message });
-    }
-});
 
 // Get payment statistics
-app.get('/api/admin/payments/stats', verifyAdminToken, async (req, res) => {
+app.get('/api/admin/payments/status', verifyAdminToken, async (req, res) => {
     try {
         const payments = await Payment.find();
+        const students = await User.find();
         
         const totalRevenue = payments.reduce((sum, p) => sum + p.amount, 0);
-        const completedAmount = payments.filter(p => p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
-        const pendingAmount = payments.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0);
+        const completedAmount = payments
+            .filter(p => p.status === 'completed')
+            .reduce((sum, p) => sum + p.amount, 0);
+        const pendingAmount = payments
+            .filter(p => p.status === 'pending')
+            .reduce((sum, p) => sum + p.amount, 0);
         const successRate = totalRevenue > 0 ? Math.round((completedAmount / totalRevenue) * 100) : 0;
+        
+        // Calculate total due amount from all students
+        const totalDueAmount = students.reduce((sum, s) => sum + (s.dueAmount || 0), 0);
         
         res.status(200).json({ 
             success: true, 
@@ -1253,6 +2493,7 @@ app.get('/api/admin/payments/stats', verifyAdminToken, async (req, res) => {
                 completedAmount,
                 pendingAmount,
                 successRate,
+                totalDueAmount,
                 totalPayments: payments.length,
                 completedCount: payments.filter(p => p.status === 'completed').length,
                 pendingCount: payments.filter(p => p.status === 'pending').length,
@@ -1262,6 +2503,29 @@ app.get('/api/admin/payments/stats', verifyAdminToken, async (req, res) => {
     } catch (error) {
         console.error('Error fetching payment stats:', error);
         res.status(500).json({ success: false, message: 'Error fetching statistics', error: error.message });
+    }
+});
+
+// Get all student payments (for a specific student)
+app.get('/api/admin/student-payments/:studentId', verifyAdminToken, async (req, res) => {
+    try {
+        const payments = await Payment.find({ studentId: req.params.studentId })
+            .sort({ paymentDate: -1 });
+        
+        const student = await User.findById(req.params.studentId).select('name registrationId packagePrice dueAmount paymentAmount');
+        
+        res.status(200).json({ 
+            success: true, 
+            data: {
+                studentDetails: student,
+                payments: payments,
+                totalPaid: student?.paymentAmount || 0,
+                dueAmount: student?.dueAmount || 0
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching student payments:', error);
+        res.status(500).json({ success: false, message: 'Error fetching student payments', error: error.message });
     }
 });
 
@@ -1277,8 +2541,10 @@ app.listen(PORT, () => {
     console.log(`\n🚀 Server running on http://localhost:${PORT}`);
     console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not Configured'}`);
     console.log(`\n📡 API Endpoints:`);
-    console.log(`   POST   /api/register - Student Registration`);
+    console.log(`   POST   /api/register - Student Registration (with email)`);
     console.log(`   POST   /api/user/login - Student Login`);
+    console.log(`   POST   /api/student/first-time-password - First Time Password Change (with email)`);
+    console.log(`   PUT    /api/student/change-password - Change Password (with email)`);
     console.log(`   POST   /api/login - Admin Login`);
     console.log(`   GET    /api/student/profile - Student Profile`);
     console.log(`   GET    /api/student/dashboard-stats - Dashboard Stats`);

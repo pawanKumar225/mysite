@@ -1,0 +1,952 @@
+//======================EMAILS+++++++++++++++++++++++
+// Send welcome email to student with registration details - FIXED with proper background
+const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
+    try {
+        const { name, email, registrationId, packageDetails, packagePrice, paymentAmount, dueAmount, dateOfJoin } = userData;
+        
+        const formattedDateOfJoin = dateOfJoin ? new Date(dateOfJoin).toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        }) : 'Not specified';
+        
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Welcome to Intense Beauty Academy</title>
+                <style>
+                    * {
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        line-height: 1.6;
+                        background-color: #f0f2f5;
+                        margin: 0;
+                        padding: 20px;
+                    }
+                    .email-container {
+                        max-width: 650px;
+                        margin: 0 auto;
+                        background-color: #ffffff;
+                        border-radius: 16px;
+                        overflow: hidden;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #ff6b6b 0%, #ff8e8e 100%);
+                        padding: 30px 20px;
+                        text-align: center;
+                    }
+                    .logo {
+                        margin-bottom: 15px;
+                    }
+                    .logo-text {
+                        font-size: 28px;
+                        font-weight: bold;
+                        color: #ffffff;
+                        letter-spacing: 2px;
+                    }
+                    .logo-sub {
+                        font-size: 12px;
+                        color: rgba(255,255,255,0.9);
+                        margin-top: 5px;
+                    }
+                    .header h1 {
+                        color: #ffffff;
+                        font-size: 24px;
+                        margin-top: 10px;
+                        font-weight: 600;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                        background: #ffffff;
+                    }
+                    .credentials {
+                        background: #fff9e6;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                        border-left: 4px solid #ff6b6b;
+                    }
+                    .details {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        font-weight: bold;
+                        margin-top: 20px;
+                    }
+                    .footer {
+                        background: #2c3e50;
+                        color: #95a5a6;
+                        padding: 25px 30px;
+                        text-align: center;
+                        font-size: 12px;
+                    }
+                    .footer a {
+                        color: #ff8e8e;
+                        text-decoration: none;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="email-container">
+                    <div class="header">
+                        <div class="logo">
+                            <div class="logo-text">✨ INTENSE ✨</div>
+                            <div class="logo-sub">Beauty Academy</div>
+                        </div>
+                        <h1>Welcome to Intense Beauty Academy! 🎓</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${name},</h2>
+                        <p>Thank you for choosing Intense Beauty Academy! We're thrilled to have you as part of our family.</p>
+                        
+                        <div class="credentials">
+                            <h3 style="color: #ff6b6b; margin-bottom: 15px;">📋 Your Login Credentials</h3>
+                            <p><strong>Registration ID:</strong> ${registrationId}</p>
+                            <p><strong>Email:</strong> ${email}</p>
+                            <p><strong>Temporary Password:</strong> <code style="background:#f0f0f0; padding:4px 8px; border-radius:4px;">${defaultPassword}</code></p>
+                            <p style="margin-top: 15px; color: #e67e22;"><strong>⚠️ Important:</strong> Please change your password after first login.</p>
+                        </div>
+                        
+                        <div class="details">
+                            <h3 style="color: #ff6b6b;">📚 Course Enrollment Details</h3>
+                            <p><strong>Package:</strong> ${packageDetails || 'Not specified'}</p>
+                            <p><strong>Date of Joining:</strong> ${formattedDateOfJoin}</p>
+                            <p><strong>Total Package Price:</strong> ${packagePrice || '₹0'}</p>
+                            <p><strong>Amount Paid:</strong> ₹${(paymentAmount || 0).toLocaleString()}</p>
+                            ${dueAmount > 0 ? `<p><strong>Due Amount:</strong> ₹${dueAmount.toLocaleString()}</p>` : ''}
+                            <p><strong>Payment Status:</strong> <span style="color: ${dueAmount === 0 ? '#27ae60' : '#e67e22'};">${dueAmount === 0 ? '✅ Fully Paid' : '⏳ Partially Paid'}</span></p>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">🚀 Login to Student Portal</a>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                        <p>Contact: support@intensebeautyacademy.com | Phone: +91 XXXXXXXXXX</p>
+                        <p><a href="http://localhost:5173">www.intensebeautyacademy.com</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `🎓 Welcome to Intense Beauty Academy - Login Credentials (ID: ${registrationId})`,
+            html: emailHTML
+        });
+        console.log('✅ Welcome email sent to:', email);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Welcome email failed:', error);
+        return { success: false, error: error.message };
+    }
+};
+// Send email to student about approval/rejection - FIXED with proper background and logo
+async function sendStudentApprovalEmail(studentEmail, studentName, registrationId, status, remarks = '') {
+    const isApproved = status === 'approved';
+    const gradientColor = isApproved ? 'linear-gradient(135deg, #4caf50, #45a049)' : 'linear-gradient(135deg, #f44336, #da190b)';
+    const title = isApproved ? 'Registration Approved! ✅' : 'Registration Update 📋';
+    const message = isApproved 
+        ? 'Congratulations! Your registration has been approved. You can now access the student portal.'
+        : 'We regret to inform you that your registration cannot be approved at this time.';
+    
+    const emailHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Registration ${isApproved ? 'Approved' : 'Update'}</title>
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background-color: #f0f2f5;
+                    margin: 0;
+                    padding: 20px;
+                }
+                .email-container {
+                    max-width: 650px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                    border-radius: 16px;
+                    overflow: hidden;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                }
+                .header {
+                    background: ${gradientColor};
+                    padding: 30px 20px;
+                    text-align: center;
+                }
+                .logo {
+                    margin-bottom: 15px;
+                }
+                .logo-text {
+                    font-size: 28px;
+                    font-weight: bold;
+                    color: #ffffff;
+                    letter-spacing: 2px;
+                }
+                .logo-sub {
+                    font-size: 12px;
+                    color: rgba(255,255,255,0.9);
+                    margin-top: 5px;
+                }
+                .header h1 {
+                    color: #ffffff;
+                    font-size: 24px;
+                    margin-top: 10px;
+                    font-weight: 600;
+                }
+                .header p {
+                    color: rgba(255,255,255,0.9);
+                    margin-top: 5px;
+                }
+                .content {
+                    padding: 40px 30px;
+                    background: #ffffff;
+                }
+                .info-box {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 12px;
+                    margin: 20px 0;
+                    border-left: 4px solid ${isApproved ? '#4caf50' : '#f44336'};
+                }
+                .remarks-box {
+                    background: #fff9e6;
+                    padding: 20px;
+                    border-radius: 12px;
+                    margin: 20px 0;
+                    border-left: 4px solid #ffc107;
+                }
+                .button {
+                    display: inline-block;
+                    padding: 14px 35px;
+                    background: ${gradientColor};
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 50px;
+                    font-weight: bold;
+                    margin-top: 20px;
+                    transition: transform 0.3s ease;
+                }
+                .button:hover {
+                    transform: translateY(-2px);
+                }
+                .footer {
+                    background: #2c3e50;
+                    color: #95a5a6;
+                    padding: 25px 30px;
+                    text-align: center;
+                    font-size: 12px;
+                }
+                .footer a {
+                    color: ${isApproved ? '#81c784' : '#ef9a9a'};
+                    text-decoration: none;
+                }
+                .success-icon {
+                    font-size: 48px;
+                    margin-bottom: 10px;
+                }
+                .warning-icon {
+                    font-size: 48px;
+                    margin-bottom: 10px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="email-container">
+                <div class="header">
+                    <div class="logo">
+                        <div class="logo-text">✨ INTENSE ✨</div>
+                        <div class="logo-sub">Beauty Academy</div>
+                    </div>
+                    <div class="${isApproved ? 'success-icon' : 'warning-icon'}">
+                        ${isApproved ? '✅' : '📋'}
+                    </div>
+                    <h1>${title}</h1>
+                    ${!isApproved ? '<p>Please review the details below</p>' : '<p>Welcome to the Intense Beauty Academy family!</p>'}
+                </div>
+                <div class="content">
+                    <h2>Dear ${studentName},</h2>
+                    <p>${message}</p>
+                    
+                    <div class="info-box">
+                        <h3 style="color: ${isApproved ? '#4caf50' : '#f44336'}; margin-bottom: 15px;">📋 Registration Details</h3>
+                        <p><strong>Registration ID:</strong> ${registrationId}</p>
+                        <p><strong>Status:</strong> <span style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-weight: bold;">${status.toUpperCase()}</span></p>
+                        ${isApproved ? '<p><strong>Account Status:</strong> ✅ Active</p>' : '<p><strong>Account Status:</strong> ❌ Not Approved</p>'}
+                    </div>
+                    
+                    ${remarks ? `
+                    <div class="remarks-box">
+                        <strong>📝 Remarks from Administrator:</strong>
+                        <p style="margin-top: 10px;">${remarks}</p>
+                    </div>
+                    ` : ''}
+                    
+                    ${isApproved ? `
+                    <div style="background: #e8f5e9; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <h3 style="color: #4caf50; margin-bottom: 15px;">🎉 What's Next?</h3>
+                        <ol style="margin-left: 20px;">
+                            <li>Login to your student portal using your credentials</li>
+                            <li>Change your temporary password for security</li>
+                            <li>Complete your profile information</li>
+                            <li>Start your course modules</li>
+                        </ol>
+                    </div>
+                    
+                    <div style="text-align: center;">
+                        <a href="http://localhost:5173/user/login" class="button">🚀 Login to Student Portal</a>
+                    </div>
+                    ` : `
+                    <div style="background: #ffebee; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <h3 style="color: #f44336; margin-bottom: 15px;">❓ Need Assistance?</h3>
+                        <p>If you believe this is an error or need more information, please contact our admission office:</p>
+                        <p>📞 Phone: +91 XXXXXXXXXX</p>
+                        <p>✉️ Email: admissions@intensebeautyacademy.com</p>
+                    </div>
+                    `}
+                    
+                    <div style="margin-top: 30px; padding: 15px; background: #f0f2f5; border-radius: 10px; text-align: center;">
+                        <p style="margin: 0; color: #666;">
+                            <strong>📞 Need Help?</strong> Contact our support team at support@intensebeautyacademy.com
+                        </p>
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                    <p>Contact: support@intensebeautyacademy.com | Phone: +91 XXXXXXXXXX</p>
+                    <p><a href="http://localhost:5173">www.intensebeautyacademy.com</a></p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    try {
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: studentEmail,
+            subject: `${isApproved ? '✅ Registration Approved' : '📋 Registration Update'} - ${registrationId}`,
+            html: emailHTML
+        });
+        console.log(`✅ Student ${status} email sent to: ${studentEmail}`);
+        return { success: true };
+    } catch (error) {
+        console.error(`❌ Student email failed:`, error);
+        return { success: false, error: error.message };
+    }
+}
+// Send email notification for payment update - FIXED with proper background
+const sendPaymentUpdateEmail = async (student, oldAmount, newAmount, dueAmount) => {
+    try {
+        const amountDifference = newAmount - oldAmount;
+        const isIncrease = amountDifference > 0;
+        
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Payment Update Notification</title>
+                <style>
+                    * {
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        background-color: #f0f2f5;
+                        margin: 0;
+                        padding: 20px;
+                    }
+                    .email-container {
+                        max-width: 650px;
+                        margin: 0 auto;
+                        background-color: #ffffff;
+                        border-radius: 16px;
+                        overflow: hidden;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+                        padding: 30px 20px;
+                        text-align: center;
+                    }
+                    .logo {
+                        margin-bottom: 15px;
+                    }
+                    .logo-text {
+                        font-size: 28px;
+                        font-weight: bold;
+                        color: #ffffff;
+                        letter-spacing: 2px;
+                    }
+                    .logo-sub {
+                        font-size: 12px;
+                        color: rgba(255,255,255,0.9);
+                        margin-top: 5px;
+                    }
+                    .header h1 {
+                        color: #ffffff;
+                        font-size: 24px;
+                        margin-top: 10px;
+                        font-weight: 600;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                        background: #ffffff;
+                    }
+                    .update-box {
+                        background: #e3f2fd;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                        border-left: 4px solid #2196f3;
+                    }
+                    .amount-change {
+                        font-size: 20px;
+                        font-weight: bold;
+                        text-align: center;
+                        padding: 15px;
+                        border-radius: 10px;
+                        margin: 15px 0;
+                        background: ${isIncrease ? '#e8f5e9' : '#ffebee'};
+                        color: ${isIncrease ? '#4caf50' : '#f44336'};
+                    }
+                    .details {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #2196f3, #1976d2);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        font-weight: bold;
+                        margin-top: 20px;
+                    }
+                    .footer {
+                        background: #2c3e50;
+                        color: #95a5a6;
+                        padding: 25px 30px;
+                        text-align: center;
+                        font-size: 12px;
+                    }
+                    .footer a {
+                        color: #64b5f6;
+                        text-decoration: none;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="email-container">
+                    <div class="header">
+                        <div class="logo">
+                            <div class="logo-text">✨ INTENSE ✨</div>
+                            <div class="logo-sub">Beauty Academy</div>
+                        </div>
+                        <h1>💰 Payment Update Notification</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${student.name},</h2>
+                        <p>Your payment record has been updated by the administrator. Please review the changes below:</p>
+                        
+                        <div class="update-box">
+                            <h3 style="color: #1976d2; margin-bottom: 15px;">📊 Payment Update Details</h3>
+                            <p><strong>Previous Amount:</strong> ₹${oldAmount.toLocaleString()}</p>
+                            <p><strong>New Amount:</strong> ₹${newAmount.toLocaleString()}</p>
+                            <div class="amount-change">
+                                ${isIncrease ? '↑ Amount Increased by' : '↓ Amount Decreased by'} ₹${Math.abs(amountDifference).toLocaleString()}
+                            </div>
+                        </div>
+                        
+                        <div class="details">
+                            <h3 style="color: #1976d2;">📚 Updated Payment Summary</h3>
+                            <p><strong>Registration ID:</strong> ${student.registrationId}</p>
+                            <p><strong>Course Package:</strong> ${student.packageDetails || 'N/A'}</p>
+                            <p><strong>Total Package Price:</strong> ${student.packagePrice || '₹0'}</p>
+                            <p><strong>Total Paid Amount:</strong> ₹${student.paymentAmount.toLocaleString()}</p>
+                            <p><strong>Remaining Due:</strong> <span style="color: ${dueAmount > 0 ? '#f59e0b' : '#27ae60'}; font-weight: bold;">${dueAmount > 0 ? `₹${dueAmount.toLocaleString()}` : '✅ Fully Paid'}</span></p>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">📋 View Payment History</a>
+                        </div>
+                        
+                        <div style="margin-top: 30px; padding: 15px; background: #fff9e6; border-radius: 10px;">
+                            <p style="margin: 0; color: #856404;">
+                                <strong>📝 Note:</strong> If you have any questions about this payment update, please contact the academy administration.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                        <p>Contact: support@intensebeautyacademy.com | Phone: +91 XXXXXXXXXX</p>
+                        <p><a href="http://localhost:5173">www.intensebeautyacademy.com</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: student.email,
+            subject: `💰 Payment Update Notification - ${student.registrationId}`,
+            html: emailHTML
+        });
+        console.log(`✅ Payment update email sent to: ${student.email}`);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Payment update email failed:', error);
+        return { success: false, error: error.message };
+    }
+};
+// Send email notification for new payment - FIXED with proper background
+const sendNewPaymentEmail = async (student, amount, dueAmount) => {
+    try {
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>New Payment Received</title>
+                <style>
+                    * {
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        background-color: #f0f2f5;
+                        margin: 0;
+                        padding: 20px;
+                    }
+                    .email-container {
+                        max-width: 650px;
+                        margin: 0 auto;
+                        background-color: #ffffff;
+                        border-radius: 16px;
+                        overflow: hidden;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+                        padding: 30px 20px;
+                        text-align: center;
+                    }
+                    .logo {
+                        margin-bottom: 15px;
+                    }
+                    .logo-text {
+                        font-size: 28px;
+                        font-weight: bold;
+                        color: #ffffff;
+                        letter-spacing: 2px;
+                    }
+                    .logo-sub {
+                        font-size: 12px;
+                        color: rgba(255,255,255,0.9);
+                        margin-top: 5px;
+                    }
+                    .header h1 {
+                        color: #ffffff;
+                        font-size: 24px;
+                        margin-top: 10px;
+                        font-weight: 600;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                        background: #ffffff;
+                    }
+                    .payment-details {
+                        background: #e8f5e9;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                        border-left: 4px solid #4caf50;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #4caf50, #45a049);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        font-weight: bold;
+                        margin-top: 20px;
+                    }
+                    .footer {
+                        background: #2c3e50;
+                        color: #95a5a6;
+                        padding: 25px 30px;
+                        text-align: center;
+                        font-size: 12px;
+                    }
+                    .footer a {
+                        color: #81c784;
+                        text-decoration: none;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="email-container">
+                    <div class="header">
+                        <div class="logo">
+                            <div class="logo-text">✨ INTENSE ✨</div>
+                            <div class="logo-sub">Beauty Academy</div>
+                        </div>
+                        <h1>💰 New Payment Received!</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${student.name},</h2>
+                        <p>A new payment has been recorded for your account.</p>
+                        
+                        <div class="payment-details">
+                            <h3 style="color: #4caf50; margin-bottom: 15px;">📊 Payment Details</h3>
+                            <p><strong>Amount Paid:</strong> ₹${amount.toLocaleString()}</p>
+                            <p><strong>Remaining Due:</strong> ${dueAmount > 0 ? `₹${dueAmount.toLocaleString()}` : '✅ Fully Paid'}</p>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">💰 View Payment History</a>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                        <p>Contact: support@intensebeautyacademy.com | Phone: +91 XXXXXXXXXX</p>
+                        <p><a href="http://localhost:5173">www.intensebeautyacademy.com</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: student.email,
+            subject: `💰 New Payment Received - ${student.registrationId}`,
+            html: emailHTML
+        });
+        console.log(`✅ New payment email sent to: ${student.email}`);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ New payment email failed:', error);
+        return { success: false };
+    }
+};
+// Send email for password change confirmation - FIXED with proper background
+const sendPasswordChangeConfirmation = async (userData) => {
+    try {
+        const { name, email, registrationId } = userData;
+        
+        const emailHTML = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Password Changed Successfully</title>
+                <style>
+                    * {
+                        margin: 0;
+                        padding: 0;
+                        box-sizing: border-box;
+                    }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        background-color: #f0f2f5;
+                        margin: 0;
+                        padding: 20px;
+                    }
+                    .email-container {
+                        max-width: 650px;
+                        margin: 0 auto;
+                        background-color: #ffffff;
+                        border-radius: 16px;
+                        overflow: hidden;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+                        padding: 30px 20px;
+                        text-align: center;
+                    }
+                    .logo {
+                        margin-bottom: 15px;
+                    }
+                    .logo-text {
+                        font-size: 28px;
+                        font-weight: bold;
+                        color: #ffffff;
+                        letter-spacing: 2px;
+                    }
+                    .logo-sub {
+                        font-size: 12px;
+                        color: rgba(255,255,255,0.9);
+                        margin-top: 5px;
+                    }
+                    .header h1 {
+                        color: #ffffff;
+                        font-size: 24px;
+                        margin-top: 10px;
+                        font-weight: 600;
+                    }
+                    .content {
+                        padding: 40px 30px;
+                        background: #ffffff;
+                    }
+                    .alert-box {
+                        background: #e8f5e9;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                        border-left: 4px solid #4caf50;
+                    }
+                    .warning-box {
+                        background: #fff9e6;
+                        padding: 20px;
+                        border-radius: 12px;
+                        margin: 20px 0;
+                        border-left: 4px solid #f39c12;
+                    }
+                    .button {
+                        display: inline-block;
+                        padding: 14px 35px;
+                        background: linear-gradient(135deg, #f39c12, #e67e22);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 50px;
+                        font-weight: bold;
+                        margin-top: 20px;
+                    }
+                    .footer {
+                        background: #2c3e50;
+                        color: #95a5a6;
+                        padding: 25px 30px;
+                        text-align: center;
+                        font-size: 12px;
+                    }
+                    .footer a {
+                        color: #f39c12;
+                        text-decoration: none;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="email-container">
+                    <div class="header">
+                        <div class="logo">
+                            <div class="logo-text">✨ INTENSE ✨</div>
+                            <div class="logo-sub">Beauty Academy</div>
+                        </div>
+                        <h1>🔐 Password Changed Successfully!</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Dear ${name},</h2>
+                        <div class="alert-box">
+                            <p>✅ Your account password has been successfully changed.</p>
+                            <p><strong>Registration ID:</strong> ${registrationId}</p>
+                            <p><strong>Email:</strong> ${email}</p>
+                            <p><strong>Changed On:</strong> ${new Date().toLocaleString()}</p>
+                        </div>
+                        
+                        <div class="warning-box">
+                            <p><strong>⚠️ Security Alert:</strong> If you did NOT change your password, please contact our support team immediately.</p>
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <a href="http://localhost:5173/user/login" class="button">🔑 Login to Your Account</a>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                        <p>Contact: support@intensebeautyacademy.com | Phone: +91 XXXXXXXXXX</p>
+                        <p><a href="http://localhost:5173">www.intensebeautyacademy.com</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: `🔐 Password Changed Successfully - ${registrationId}`,
+            html: emailHTML
+        });
+        console.log('✅ Password change confirmation email sent to:', email);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Password change email failed:', error);
+        return { success: false, error: error.message };
+    }
+};
+// Send email notification to admin - FIXED with proper background
+async function sendAdminEmailNotification(adminEmail, adminName, studentName, studentEmail, registrationId) {
+    const emailHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>New Student Registration - Action Required</title>
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background-color: #f0f2f5;
+                    margin: 0;
+                    padding: 20px;
+                }
+                .email-container {
+                    max-width: 650px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                    border-radius: 16px;
+                    overflow: hidden;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                }
+                .header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    padding: 30px 20px;
+                    text-align: center;
+                }
+                .logo {
+                    margin-bottom: 15px;
+                }
+                .logo-text {
+                    font-size: 28px;
+                    font-weight: bold;
+                    color: #ffffff;
+                    letter-spacing: 2px;
+                }
+                .logo-sub {
+                    font-size: 12px;
+                    color: rgba(255,255,255,0.9);
+                    margin-top: 5px;
+                }
+                .header h1 {
+                    color: #ffffff;
+                    font-size: 24px;
+                    margin-top: 10px;
+                    font-weight: 600;
+                }
+                .content {
+                    padding: 40px 30px;
+                    background: #ffffff;
+                }
+                .student-details {
+                    background: #f3e5f5;
+                    padding: 20px;
+                    border-radius: 12px;
+                    margin: 20px 0;
+                    border-left: 4px solid #9c27b0;
+                }
+                .button {
+                    display: inline-block;
+                    padding: 14px 35px;
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 50px;
+                    font-weight: bold;
+                    margin-top: 20px;
+                }
+                .footer {
+                    background: #2c3e50;
+                    color: #95a5a6;
+                    padding: 25px 30px;
+                    text-align: center;
+                    font-size: 12px;
+                }
+                .footer a {
+                    color: #b39ddb;
+                    text-decoration: none;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="email-container">
+                <div class="header">
+                    <div class="logo">
+                        <div class="logo-text">✨ INTENSE ✨</div>
+                        <div class="logo-sub">Beauty Academy</div>
+                    </div>
+                    <h1>🎓 New Student Registration!</h1>
+                    <p style="color: rgba(255,255,255,0.9); margin-top: 10px;">Action Required</p>
+                </div>
+                <div class="content">
+                    <h2>Dear ${adminName},</h2>
+                    <p>A new student has registered and is awaiting your approval.</p>
+                    <div class="student-details">
+                        <p><strong>Student Name:</strong> ${studentName}</p>
+                        <p><strong>Email:</strong> ${studentEmail}</p>
+                        <p><strong>Registration ID:</strong> ${registrationId}</p>
+                    </div>
+                    <div style="text-align: center;">
+                        <a href="http://localhost:5173/admin/approvals" class="button">📋 Review Registration</a>
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>© ${new Date().getFullYear()} Intense Beauty Academy. All rights reserved.</p>
+                    <p><a href="http://localhost:5173/admin">Admin Dashboard</a></p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+    
+    try {
+        await transporter.sendMail({
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: adminEmail,
+            subject: `🎓 New Student Registration - Action Required (${registrationId})`,
+            html: emailHTML
+        });
+        console.log(`✅ Admin email sent to: ${adminEmail}`);
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Admin email failed:', error);
+        return { success: false };
+    }
+}
