@@ -147,6 +147,8 @@ const moduleCompletionSchema = new mongoose.Schema({
 
 // Admin Schema
 
+// In your server.js, completely REPLACE the adminSchema with this:
+
 const adminSchema = new mongoose.Schema({
     employeeId: { 
         type: String, 
@@ -167,8 +169,8 @@ const adminSchema = new mongoose.Schema({
     },
     password: { 
         type: String, 
-        required: true,
-        select: false 
+        required: true 
+        // REMOVED select: false - this was causing the issue
     },
     role: { 
         type: String, 
@@ -222,6 +224,47 @@ const adminSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// Hash password before saving
+adminSchema.pre('save', async function(next) {
+    if (!this.isModified('password')) return next();
+    try {
+        const salt = await bcrypt.genSalt(10);
+        this.password = await bcrypt.hash(this.password, salt);
+        console.log('Password hashed successfully for:', this.email);
+        next();
+    } catch (error) {
+        console.error('Password hashing error:', error);
+        next(error);
+    }
+});
+
+// Compare password method
+adminSchema.methods.comparePassword = async function(candidatePassword) {
+    if (!candidatePassword || !this.password) {
+        console.log('Missing password for comparison');
+        return false;
+    }
+    try {
+        const isMatch = await bcrypt.compare(candidatePassword, this.password);
+        return isMatch;
+    } catch (error) {
+        console.error('Password comparison error:', error);
+        return false;
+    }
+};
+
+// Generate employee ID
+adminSchema.pre('save', async function(next) {
+    if (!this.employeeId && this.role !== 'super_admin') {
+        const prefix = this.role === 'hr_manager' ? 'HR' : 'EMP';
+        const AdminModel = mongoose.model('Admin');
+        const count = await AdminModel.countDocuments({ role: this.role });
+        this.employeeId = `${prefix}${String(count + 1).padStart(4, '0')}`;
+    }
+    next();
+});
+
 
 // Hash password before saving
 
@@ -1720,9 +1763,16 @@ app.post('/api/register', async (req, res) => {
  * @desc    Change password on first login for admin/employee
  * @access  Private (requires token from login)
  */
+// First-Time Password Change Endpoint - FIXED
+// COMPLETELY REPLACE the first-time password endpoint with this:
+
 app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
     try {
         const { newPassword, confirmPassword } = req.body;
+        
+        console.log("=== First-time password change request ===");
+        console.log("Request body:", { newPassword: newPassword ? '***' : 'missing', confirmPassword: confirmPassword ? '***' : 'missing' });
+        console.log("Admin from token:", req.admin ? req.admin.email : "No admin found");
         
         // Validate passwords
         if (!newPassword || !confirmPassword) {
@@ -1747,7 +1797,7 @@ app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
             });
         }
         
-        // Check for password strength (optional)
+        // Check for password strength
         const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
         if (!passwordRegex.test(newPassword)) {
             return res.status(400).json({
@@ -1756,7 +1806,7 @@ app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
             });
         }
         
-        // Get admin from token (attached by verifyAdminToken middleware)
+        // Get admin from token
         const admin = req.admin;
         
         if (!admin) {
@@ -1766,6 +1816,8 @@ app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
             });
         }
         
+        console.log('Admin found:', admin.email, 'isPasswordChanged:', admin.isPasswordChanged);
+        
         // Check if password already changed
         if (admin.isPasswordChanged) {
             return res.status(400).json({
@@ -1774,60 +1826,57 @@ app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
             });
         }
         
-        // Check if trying to use same as old password
-        const isSamePassword = await admin.comparePassword(newPassword);
-        if (isSamePassword) {
-            return res.status(400).json({
-                success: false,
-                message: 'New password cannot be the same as old password'
-            });
-        }
+        // Hash the new password directly
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
         
-        // Update password
-        admin.password = newPassword; // Will be hashed by pre-save middleware
+        // Update admin directly
+        admin.password = hashedPassword;
         admin.isPasswordChanged = true;
         admin.lastPasswordChange = new Date();
-        admin.loginAttempts = 0; // Reset login attempts
-        admin.lockUntil = undefined; // Remove lock if any
+        admin.loginAttempts = 0;
+        admin.lockUntil = undefined;
         
         await admin.save();
+        console.log(`✅ Password changed successfully for admin: ${admin.email}`);
         
-        // Send password change confirmation email
-        const emailResult = await sendAdminPasswordChangeConfirmation({
-            name: admin.name,
-            email: admin.email,
-            employeeId: admin.employeeId,
-            role: admin.role
-        });
+        // Send email notification (optional - won't break if fails)
+        let emailSent = false;
+        try {
+            if (transporter && process.env.EMAIL_USER) {
+                await sendAdminPasswordChangeConfirmation({
+                    name: admin.name,
+                    email: admin.email,
+                    employeeId: admin.employeeId,
+                    role: admin.role
+                });
+                emailSent = true;
+            }
+        } catch (emailError) {
+            console.error('Email sending failed:', emailError.message);
+        }
         
-        // Send notification to super admins about password change
-        await sendNotificationToSuperAdmins(
-            'Admin Password Change',
-            `${admin.name} (${admin.email}) has changed their password on first login.`,
-            'password_change',
-            admin._id
-        );
-        
-        // Generate new token with updated info
-        const jwt = require('jsonwebtoken');
+        // Generate new token
         const newToken = jwt.sign(
             { 
                 id: admin._id, 
                 email: admin.email, 
                 role: admin.role,
+                type: 'admin',
                 isPasswordChanged: true 
             },
-            process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+            JWT_SECRET,
+            { expiresIn: '7d' }
         );
         
         res.status(200).json({
             success: true,
-            message: emailResult.success 
+            message: emailSent 
                 ? 'Password changed successfully! A confirmation email has been sent.'
-                : 'Password changed successfully! (Confirmation email could not be sent)',
+                : 'Password changed successfully!',
             token: newToken,
             data: {
+                id: admin._id,
                 name: admin.name,
                 email: admin.email,
                 role: admin.role,
@@ -1841,11 +1890,44 @@ app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error updating password',
-            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+            error: error.message
         });
     }
 });
+// Add this function after your other email functions
+const sendNotificationToSuperAdmins = async (title, message, type, adminId) => {
+    try {
+        const superAdmins = await Admin.find({ 
+            role: 'super_admin', 
+            isActive: true 
+        });
+        
+        if (superAdmins.length === 0) return;
+        
+        // Create notifications for super admins
+        const notifications = superAdmins.map(admin => ({
+            recipientId: admin._id,
+            recipientRole: admin.role,
+            title,
+            message,
+            type,
+            relatedId: adminId,
+            isRead: false,
+            createdAt: new Date()
+        }));
+        
+        await Notification.insertMany(notifications);
+        console.log(`📧 Notifications sent to ${notifications.length} super admins`);
+        return { success: true };
+    } catch (error) {
+        console.error('Error sending notification:', error);
+        return { success: false };
+    }
+};
 
+// Make sure your admin login endpoint returns requiresPasswordChange flag
+// This should already be in your server.js, but verify it has this line:
+// requiresPasswordChange: !admin.isPasswordChanged
 app.post('/admin/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
@@ -2051,18 +2133,94 @@ app.put('/api/student/change-password', verifyStudentToken, async (req, res) => 
 });
 
 // Admin Login
+// app.post('/api/login', async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+//         const admin = await Admin.findOne({ email }).select('+password');
+//         if (!admin) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        
+//         const isPasswordValid = await admin.comparePassword(password);
+//         if (!isPasswordValid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        
+//         const token = jwt.sign({ id: admin._id, email: admin.email, role: admin.role, type: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+//         const adminData = admin.toObject();
+//         delete adminData.password;
+        
+//         res.status(200).json({ 
+//             success: true, 
+//             message: 'Login successful', 
+//             data: { 
+//                 admin: adminData, 
+//                 token, 
+//                 requiresPasswordChange: !admin.isPasswordChanged 
+//             } 
+//         });
+//     } catch (error) {
+//         res.status(500).json({ success: false, message: 'Error logging in', error: error.message });
+//     }
+// });
+
+
+
+// REPLACE the admin login endpoint with this:
+
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const admin = await Admin.findOne({ email }).select('+password');
-        if (!admin) return res.status(401).json({ success: false, message: 'Invalid credentials' });
         
+        console.log('Login attempt for:', email);
+        
+        if (!email || !password) {
+            return res.status(400).json({ success: false, message: 'Email and password required' });
+        }
+        
+        // Find admin (no select needed since we removed select:false)
+        const admin = await Admin.findOne({ email: email.toLowerCase() });
+        
+        if (!admin) {
+            console.log('Admin not found:', email);
+            return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+        
+        if (!admin.isActive) {
+            return res.status(401).json({ success: false, message: 'Account is deactivated' });
+        }
+        
+        // Compare password
         const isPasswordValid = await admin.comparePassword(password);
-        if (!isPasswordValid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
         
-        const token = jwt.sign({ id: admin._id, email: admin.email, role: admin.role, type: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-        const adminData = admin.toObject();
-        delete adminData.password;
+        if (!isPasswordValid) {
+            console.log('Invalid password for:', email);
+            return res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+        
+        // Update last login
+        admin.lastLogin = new Date();
+        await admin.save();
+        
+        // Generate token
+        const token = jwt.sign(
+            { 
+                id: admin._id, 
+                email: admin.email, 
+                role: admin.role, 
+                type: 'admin' 
+            }, 
+            JWT_SECRET, 
+            { expiresIn: '7d' }
+        );
+        
+        const adminData = {
+            id: admin._id,
+            name: admin.name,
+            email: admin.email,
+            role: admin.role,
+            isPasswordChanged: admin.isPasswordChanged,
+            employeeId: admin.employeeId,
+            isActive: admin.isActive
+        };
+        
+        console.log('Login successful for:', email, 'Password changed:', admin.isPasswordChanged);
         
         res.status(200).json({ 
             success: true, 
@@ -2073,11 +2231,12 @@ app.post('/api/login', async (req, res) => {
                 requiresPasswordChange: !admin.isPasswordChanged 
             } 
         });
+        
     } catch (error) {
+        console.error('Login error:', error);
         res.status(500).json({ success: false, message: 'Error logging in', error: error.message });
     }
 });
-
 // Student Profile
 app.get('/api/student/profile', verifyStudentToken, async (req, res) => {
     try {
