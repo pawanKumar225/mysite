@@ -146,22 +146,102 @@ const moduleCompletionSchema = new mongoose.Schema({
 });
 
 // Admin Schema
+
 const adminSchema = new mongoose.Schema({
-    employeeId: { type: String, unique: true, sparse: true },
-    name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    password: { type: String, required: true, select: false },
-    role: { type: String, enum: ['super_admin', 'hr_manager', 'admin', 'employee'], default: 'employee' },
-    isActive: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now },
-    lastLogin: { type: Date },
-    isPasswordChanged: { type: Boolean, default: false },
-    phone: { type: String, trim: true, default: '' },
-    department: { type: String, default: 'General' },
-    salary: { type: String, default: '$0' },
-    loginAttempts: { type: Number, default: 0 },
-    lockUntil: { type: Date }
+    employeeId: { 
+        type: String, 
+        unique: true, 
+        sparse: true 
+    },
+    name: { 
+        type: String, 
+        required: true, 
+        trim: true 
+    },
+    email: { 
+        type: String, 
+        required: true, 
+        unique: true, 
+        lowercase: true, 
+        trim: true 
+    },
+    password: { 
+        type: String, 
+        required: true,
+        select: false 
+    },
+    role: { 
+        type: String, 
+        enum: ['super_admin', 'hr_manager', 'admin', 'employee'], 
+        default: 'employee' 
+    },
+    isActive: { 
+        type: Boolean, 
+        default: true 
+    },
+    createdAt: { 
+        type: Date, 
+        default: Date.now 
+    },
+    lastLogin: { 
+        type: Date 
+    },
+    isPasswordChanged: { 
+        type: Boolean, 
+        default: false 
+    },
+    phone: { 
+        type: String, 
+        trim: true, 
+        default: '' 
+    },
+    department: { 
+        type: String, 
+        default: 'General' 
+    },
+    salary: { 
+        type: String, 
+        default: '$0' 
+    },
+    loginAttempts: { 
+        type: Number, 
+        default: 0 
+    },
+    lockUntil: { 
+        type: Date 
+    },
+    lastPasswordChange: {
+        type: Date
+    },
+    passwordResetToken: {
+        type: String
+    },
+    passwordResetExpires: {
+        type: Date
+    }
+}, {
+    timestamps: true
 });
+
+// Hash password before saving
+
+
+// Compare password method
+adminSchema.methods.comparePassword = async function(candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
+};
+
+// Generate employee ID
+adminSchema.pre('save', async function(next) {
+    if (!this.employeeId && this.role !== 'super_admin') {
+        const prefix = this.role === 'hr_manager' ? 'HR' : 'EMP';
+        const count = await mongoose.model('Admin').countDocuments({ role: this.role });
+        this.employeeId = `${prefix}${String(count + 1).padStart(4, '0')}`;
+    }
+    next();
+});
+
+
 
 // Notification Schema
 const notificationSchema = new mongoose.Schema({
@@ -377,8 +457,90 @@ const generateDefaultPassword = () => {
     
     return password.split('').sort(() => 0.5 - Math.random()).join('');
 };
+const emailTransporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: process.env.SMTP_PORT || 587,
+    secure: false,
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    },
+    // Add timeout to avoid hanging
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000
+});
 
+// Function to send email
+const sendAdminCredentialsEmail = async (name, email, defaultPassword, role) => {
+    try {
+        const mailOptions = {
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Welcome to Intense Beauty Academy - Your Admin Credentials',
+            html: `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                        .header { background: linear-gradient(135deg, #FF6B9D, #FF4D7D); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                        .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+                        .credentials { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #FF6B9D; }
+                        .password { font-size: 20px; font-weight: bold; color: #FF6B9D; background: #f0f0f0; padding: 10px; text-align: center; border-radius: 5px; letter-spacing: 2px; }
+                        .footer { text-align: center; margin-top: 30px; font-size: 12px; color: #999; }
+                        .button { display: inline-block; background: #FF6B9D; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+                        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h2>Welcome to Intense Beauty Academy!</h2>
+                        </div>
+                        <div class="content">
+                            <h3>Hello ${name},</h3>
+                            <p>Your admin account has been created successfully with the following credentials:</p>
+                            
+                            <div class="credentials">
+                                <p><strong>📧 Email:</strong> ${email}</p>
+                                <p><strong>👤 Role:</strong> ${role}</p>
+                                <p><strong>🔐 Default Password:</strong></p>
+                                <div class="password">${defaultPassword}</div>
+                            </div>
+                            
+                            <div class="warning">
+                                <strong>⚠️ Important:</strong>
+                                <ul style="margin: 10px 0 0 20px;">
+                                    <li>This is a system-generated password</li>
+                                    <li>Please change your password after first login</li>
+                                    <li>Do not share these credentials with anyone</li>
+                                </ul>
+                            </div>
+                            
+                            <p>You can now login to your admin panel:</p>
+                            <a href="${process.env.ADMIN_LOGIN_URL || 'https://yourdomain.com/admin/login'}" class="button">Login to Admin Panel</a>
+                        </div>
+                        <div class="footer">
+                            <p>This is an automated message, please do not reply.</p>
+                            <p>&copy; 2024 Intense Beauty Academy. All rights reserved.</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            `,
+            text: `Welcome to Intense Beauty Academy!\n\nHello ${name},\n\nYour admin account has been created.\n\nEmail: ${email}\nRole: ${role}\nDefault Password: ${defaultPassword}\n\nPlease change your password after first login.\n\nLogin here: ${process.env.ADMIN_LOGIN_URL || 'https://yourdomain.com/admin/login'}`
+        };
 
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log('Email sent:', info.messageId);
+        return true;
+    } catch (error) {
+        console.error('Email sending failed:', error);
+        return false;
+    }
+};
 
 // Send welcome email to student with registration details
 const sendStudentWelcomeEmail = async (userData, defaultPassword) => {
@@ -760,7 +922,98 @@ const sendPasswordChangeConfirmation = async (userData) => {
         return { success: false, error: error.message };
     }
 };
+const sendAdminPasswordChangeConfirmation = async (adminData) => {
+    try {
+        const { name, email, employeeId, role } = adminData;
+        
+        const mailOptions = {
+            from: `"Intense Beauty Academy" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Password Changed Successfully - Intense Beauty Academy',
+            html: `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Password Changed Successfully</title>
+                    <style>
+                        body { font-family: 'Arial', sans-serif; line-height: 1.6; margin: 0; padding: 0; background-color: #f4f4f4; }
+                        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+                        .header { background: linear-gradient(135deg, #27ae60, #229954); color: white; padding: 30px; text-align: center; }
+                        .content { padding: 30px; }
+                        .alert-box { background: #d4edda; border-left: 4px solid #27ae60; padding: 15px; margin: 20px 0; border-radius: 5px; }
+                        .footer { text-align: center; padding: 20px; color: #999; font-size: 12px; background: #f9f9f9; }
+                        .button { display: inline-block; background: #27ae60; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin-top: 15px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h2>🔐 Password Changed Successfully</h2>
+                        </div>
+                        <div class="content">
+                            <h3>Hello ${name},</h3>
+                            <p>Your account password has been successfully changed.</p>
+                            
+                            <div class="alert-box">
+                                <p><strong>📋 Account Details:</strong></p>
+                                <p>📧 Email: ${email}</p>
+                                ${employeeId ? `<p>🆔 Employee ID: ${employeeId}</p>` : ''}
+                                <p>👔 Role: ${role.toUpperCase()}</p>
+                                <p>⏰ Changed on: ${new Date().toLocaleString()}</p>
+                            </div>
+                            
+                            <p>If you did not make this change, please contact the administrator immediately.</p>
+                            
+                            <p>For security reasons:</p>
+                            <ul>
+                                <li>Never share your password with anyone</li>
+                                <li>Use a strong, unique password</li>
+                                <li>Enable two-factor authentication if available</li>
+                            </ul>
+                        </div>
+                        <div class="footer">
+                            <p>This is an automated message from Intense Beauty Academy.</p>
+                            <p>© 2024 Intense Beauty Academy. All rights reserved.</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            `,
+            text: `
+Password Changed Successfully
 
+Hello ${name},
+
+Your account password has been successfully changed.
+
+Account Details:
+- Email: ${email}
+${employeeId ? `- Employee ID: ${employeeId}` : ''}
+- Role: ${role.toUpperCase()}
+- Changed on: ${new Date().toLocaleString()}
+
+If you did not make this change, please contact the administrator immediately.
+
+For security reasons:
+- Never share your password with anyone
+- Use a strong, unique password
+- Enable two-factor authentication if available
+
+This is an automated message from Intense Beauty Academy.
+© 2024 Intense Beauty Academy
+            `
+        };
+
+        const info = await emailTransporter.sendMail(mailOptions);
+        console.log(`✅ Password change confirmation sent to ${email}`);
+        return { success: true, messageId: info.messageId };
+    } catch (error) {
+        console.error(`❌ Failed to send password change email:`, error.message);
+        return { success: false, error: error.message };
+    }
+};
 
 // Send notification to all admins
 async function sendNotificationToAdmins(title, message, type, relatedId = null) {
@@ -1462,8 +1715,184 @@ app.post('/api/register', async (req, res) => {
         });
     }
 });
+/**
+ * @route   POST /api/admin/first-time-password
+ * @desc    Change password on first login for admin/employee
+ * @access  Private (requires token from login)
+ */
+app.post('/admin/first-time-password', verifyAdminToken, async (req, res) => {
+    try {
+        const { newPassword, confirmPassword } = req.body;
+        
+        // Validate passwords
+        if (!newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Both new password and confirm password are required'
+            });
+        }
+        
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'New password and confirm password do not match'
+            });
+        }
+        
+        // Password strength validation
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+        
+        // Check for password strength (optional)
+        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/;
+        if (!passwordRegex.test(newPassword)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
+            });
+        }
+        
+        // Get admin from token (attached by verifyAdminToken middleware)
+        const admin = req.admin;
+        
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                message: 'Admin record not found'
+            });
+        }
+        
+        // Check if password already changed
+        if (admin.isPasswordChanged) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password already changed. Please use the forgot password feature if you need to reset.'
+            });
+        }
+        
+        // Check if trying to use same as old password
+        const isSamePassword = await admin.comparePassword(newPassword);
+        if (isSamePassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'New password cannot be the same as old password'
+            });
+        }
+        
+        // Update password
+        admin.password = newPassword; // Will be hashed by pre-save middleware
+        admin.isPasswordChanged = true;
+        admin.lastPasswordChange = new Date();
+        admin.loginAttempts = 0; // Reset login attempts
+        admin.lockUntil = undefined; // Remove lock if any
+        
+        await admin.save();
+        
+        // Send password change confirmation email
+        const emailResult = await sendAdminPasswordChangeConfirmation({
+            name: admin.name,
+            email: admin.email,
+            employeeId: admin.employeeId,
+            role: admin.role
+        });
+        
+        // Send notification to super admins about password change
+        await sendNotificationToSuperAdmins(
+            'Admin Password Change',
+            `${admin.name} (${admin.email}) has changed their password on first login.`,
+            'password_change',
+            admin._id
+        );
+        
+        // Generate new token with updated info
+        const jwt = require('jsonwebtoken');
+        const newToken = jwt.sign(
+            { 
+                id: admin._id, 
+                email: admin.email, 
+                role: admin.role,
+                isPasswordChanged: true 
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        );
+        
+        res.status(200).json({
+            success: true,
+            message: emailResult.success 
+                ? 'Password changed successfully! A confirmation email has been sent.'
+                : 'Password changed successfully! (Confirmation email could not be sent)',
+            token: newToken,
+            data: {
+                name: admin.name,
+                email: admin.email,
+                role: admin.role,
+                isPasswordChanged: true,
+                employeeId: admin.employeeId
+            }
+        });
+        
+    } catch (error) {
+        console.error('First-time password change error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error updating password',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
+    }
+});
 
-
+app.post('/admin/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email address is required'
+            });
+        }
+        
+        const admin = await Admin.findOne({ email, isActive: true });
+        
+        if (!admin) {
+            return res.status(404).json({
+                success: false,
+                message: 'No account found with this email address'
+            });
+        }
+        
+        // Generate reset token
+        const crypto = require('crypto');
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetExpires = Date.now() + 3600000; // 1 hour
+        
+        admin.passwordResetToken = resetToken;
+        admin.passwordResetExpires = resetExpires;
+        await admin.save();
+        
+        // Send reset email (implement this)
+        // await sendPasswordResetEmail(admin.email, resetToken);
+        
+        res.status(200).json({
+            success: true,
+            message: 'Password reset instructions sent to your email',
+            resetToken: process.env.NODE_ENV === 'development' ? resetToken : undefined
+        });
+        
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error processing request',
+            error: error.message
+        });
+    }
+});
 // Student Login
 app.post('/api/user/login', async (req, res) => {
     try {
@@ -1908,20 +2337,110 @@ app.get('/api/admins', async (req, res) => {
 });
 
 // Admin - Create Admin
+// app.post('/api/admins', async (req, res) => {
+//     try {
+//         const { name, email, role } = req.body;
+//         const defaultPassword = generateDefaultPassword();
+        
+//         const admin = new Admin({ name, email, password: defaultPassword, role: role || 'admin', isActive: true, isPasswordChanged: false });
+//         await admin.save();
+        
+//         res.status(201).json({ success: true, message: 'Admin created successfully', data: { name, email, role: admin.role, defaultPassword } });
+//     } catch (error) {
+//         res.status(500).json({ success: false, message: 'Error creating admin', error: error.message });
+//     }
+// });
 app.post('/api/admins', async (req, res) => {
     try {
         const { name, email, role } = req.body;
-        const defaultPassword = generateDefaultPassword();
         
-        const admin = new Admin({ name, email, password: defaultPassword, role: role || 'admin', isActive: true, isPasswordChanged: false });
+        // Input validation
+        if (!name || !email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Name and email are required fields'
+            });
+        }
+        
+        // Email format validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide a valid email address'
+            });
+        }
+        
+        // Check if admin already exists
+        const existingAdmin = await Admin.findOne({ email });
+        if (existingAdmin) {
+            return res.status(400).json({
+                success: false,
+                message: 'Admin with this email already exists'
+            });
+        }
+        
+        // Generate default password
+        const defaultPassword = generateDefaultPassword(); // Your password generation function
+        
+        // Create new admin
+        const admin = new Admin({
+            name,
+            email,
+            password: defaultPassword,
+            role: role || 'admin',
+            isActive: true,
+            isPasswordChanged: false,
+            createdAt: new Date()
+        });
+        
+        // Save to database
         await admin.save();
+        console.log(`✅ Admin created: ${email}`);
         
-        res.status(201).json({ success: true, message: 'Admin created successfully', data: { name, email, role: admin.role, defaultPassword } });
+        // ============================================
+        // CALL EMAIL FUNCTION HERE
+        // ============================================
+        const emailResult = await sendAdminCredentialsEmail(
+            name, 
+            email, 
+            defaultPassword, 
+            admin.role
+        );
+        
+        // Prepare response
+        const responseData = {
+            success: true,
+            message: emailResult.success 
+                ? 'Admin created successfully and credentials sent via email'
+                : 'Admin created successfully but email delivery failed',
+            data: {
+                id: admin._id,
+                name: admin.name,
+                email: admin.email,
+                role: admin.role,
+                defaultPassword: defaultPassword, // Only for development
+                emailSent: emailResult.success,
+                createdAt: admin.createdAt
+            }
+        };
+        
+        // Add email error details if any
+        if (!emailResult.success) {
+            responseData.warning = `Admin created but email not sent: ${emailResult.error}`;
+        }
+        
+        res.status(201).json(responseData);
+        
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Error creating admin', error: error.message });
+        console.error('❌ Error creating admin:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error creating admin',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
     }
 });
-
 // Admin - Update Admin
 app.put('/api/admins/:id', async (req, res) => {
     try {
